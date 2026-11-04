@@ -1,35 +1,66 @@
 # fashion-agent-gateway
 
-**API Gateway** · 패션 에이전트(시각장애인용 코디 도우미)의 한 부분입니다.
+**API Gateway · 로그인 · 회원정보** · 패션 에이전트(시각장애인용 음성 AI 옷 추천)의 한 부분입니다.
 
-앱이 부르는 단 하나의 입구입니다. REST API로 앱의 요청을 받아 계정 확인 후 agent로 넘깁니다.
+담당: (미정)
 
-## 하는 일
+## 한눈에
 
-- REST API 제공 (앱 ↔ 서버의 유일한 연결)
-- **account**: 기존 회원인지 확인, 계정이 없으면 Apple·구글 로그인 연동
-- **회원정보**: 이름·생년월일·성별·직업·키·몸무게 저장·조회 (항목마다 건너뛰기 가능)
-- 앱 토큰 확인, 사용량 제한
-- 사용자 말과 사진을 agent로 전달
+- 포트: 8080, 엔드포인트: `http://localhost:8080`
+- 기술: Spring Boot, Spring Cloud Gateway, Spring Security, Firebase Admin(ID 토큰 검증), Spring Data JPA, Redis(사용량 제한), PostgreSQL
+- 상태 확인: `GET /actuator/health`
 
-## 지금 상태
+## API
 
-없음. 앱의 온보딩(`fashion-agent`의 `lib/agent/onboarding_flow.dart`)이 회원정보를 폰에만 저장하고 있어서, 여기 API가 생기면 그쪽을 부르도록 바꿉니다.
+| 경로 | 하는 일 |
+| --- | --- |
+| `POST /api/v1/auth/login` | Firebase ID 토큰 확인 → 우리 JWT 발급 (액세스 1시간, 리프레시 30일) |
+| `POST /api/v1/auth/dev` | 개발용 로그인 (`APP_ENV=dev`에서만) |
+| `POST /api/v1/auth/refresh` | 토큰 갱신 |
+| `GET·PUT /api/v1/me/profile` | 회원정보 (모든 항목 null 가능, 온보딩 건너뛰기) |
+| `PUT /api/v1/me/push-token` | FCM 토큰 등록 |
+| `/api/v1/agent/** → agent:8081` | agent로 전달 |
+| `/api/v1/schedules/** → mcp-schedule:8092` | 일정 조회 전달 |
+| `/api/v1/me/contacts/**, /h/** → mcp-helper:8096` | 가족·친구 연락처, 가족 답장 웹 페이지 전달 |
+
+입출력 JSON은 [OpenAPI](https://github.com/fashion-agent-team/fashion-agent/blob/develop/docs/contracts/openapi.yaml)를 그대로 따릅니다.
+
+## 이 레포가 지킬 것
+
+- 앱이 부르는 곳은 이 게이트웨이(8080) 하나뿐입니다. 뒤쪽 서비스 포트는 밖에 열지 않습니다.
+- JWT는 여기서만 만들고 확인합니다(HS256, `JWT_SECRET`). 클레임: `sub`(사용자 UUID), `provider`, `iat`, `exp`.
+- 앱이 보낸 `X-User-Id`는 지우고, 확인한 사용자 id로 다시 붙여 뒤로 넘깁니다.
+- 사용량 제한: 사용자당 분당 30회, 사진이 든 요청은 분당 10회로 시작. 넘으면 429 `rate_limited`.
+- 오류는 `{"error": {"code", "message"}}` 모양.
+- DB 스키마 `account`만 씁니다(`users`, `profiles`, `push_tokens`).
 
 ## 할 일
 
-- [ ] 언어·배포 위치 정하기
-- [ ] REST 주소와 요청·응답 JSON, 오류 코드 표 만들기 (예: `POST /chat`, `POST /outfit-check`, `GET /health`, 회원 관련 주소)
-- [ ] Apple·구글 로그인 붙이기 (앱 레포 `docs/ACCOUNT.md` 참고)
-- [ ] 회원정보를 DB에 저장
+- [ ] Spring Boot 뼈대 + `/actuator/health` + Dockerfile (이미지 `ghcr.io/fashion-agent-team/fashion-agent-gateway:dev`)
+- [ ] 앱 레포 `docs/infra/docker-compose.yml`로 postgres·redis와 같이 띄우기
+- [ ] `/api/v1/auth/dev` + JWT 발급·검증 필터 + `X-User-Id` 붙이기
+- [ ] agent로 라우팅 (`/api/v1/agent/**`)
+- [ ] 회원정보 API (`account` 스키마)
+- [ ] Firebase 로그인 (`/api/v1/auth/login`), 리프레시
+- [ ] 사용량 제한 (Redis)
 
-## 전체 구조
+## 공통 약속
 
-```
-application(fashion-agent) ─REST→ fashion-agent-gateway ─→ fashion-agent-agent ─MCP→ mcp-weather / mcp-schedule / mcp-clothes-state / mcp-face-check / mcp-closet
-                                                                                              ↓
-                                                                                              DB (계정·회원정보·일정·옷장)
-```
+모든 레포가 지키는 약속은 앱 레포에 있습니다. **코드보다 약속 문서를 먼저 고칩니다.**
+
+- [서비스 간 약속](https://github.com/fashion-agent-team/fashion-agent/blob/develop/docs/contracts/README.md): 공통 규칙, 포트, 인증(`X-User-Id`), 오류 모양, DB 스키마, 옷 추천 흐름
+- [MCP 도구 입출력](https://github.com/fashion-agent-team/fashion-agent/blob/develop/docs/contracts/mcp-tools.md)
+- [앱 ↔ 게이트웨이 API (OpenAPI)](https://github.com/fashion-agent-team/fashion-agent/blob/develop/docs/contracts/openapi.yaml)
+- [아키텍처와 기술 스택](https://github.com/fashion-agent-team/fashion-agent/blob/develop/docs/ARCHITECTURE.md)
+
+## 버전
+
+| 항목 | 버전 |
+| --- | --- |
+| Java | 21 |
+| Spring Boot | 4.0.9 |
+| Spring Cloud | 2025.1.4 |
+| Spring AI (BOM) | 2.0.2 |
 
 ## 브랜치
 
@@ -37,4 +68,4 @@ GitFlow를 따릅니다. `develop`에서 `feature/…` 브랜치를 따서 PR로
 
 ## 비밀 값
 
-API 키와 DB 접속 정보는 레포에 넣지 않습니다. 배포 환경의 비밀 값(Secret)으로만 둡니다.
+API 키와 DB 비밀번호는 레포에 넣지 않습니다. 로컬은 `.env`(커밋 금지), 배포는 서버 환경 변수로 둡니다. 목록은 앱 레포 `docs/infra/.env.example`에 있습니다.
