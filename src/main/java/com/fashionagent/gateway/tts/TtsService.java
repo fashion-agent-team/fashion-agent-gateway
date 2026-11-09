@@ -172,6 +172,11 @@ public class TtsService {
         } catch (IOException e) {
             throw failed("TTS 서버에 연결하지 못했어요: " + e.getMessage());
         }
+        if (reply.status() == 429) {
+            // Gemini TTS 무료 횟수(하루 15번쯤)를 다 씀. 앱은 한동안 폰 목소리로 읽습니다.
+            log.warn("TTS 무료 횟수 끝 {}", uri.getHost());
+            throw new ApiError(HttpStatus.TOO_MANY_REQUESTS, "tts_quota", "오늘 쓸 수 있는 목소리 횟수를 다 썼어요.");
+        }
         if (reply.status() / 100 != 2) {
             String detail = new String(reply.body(), java.nio.charset.StandardCharsets.UTF_8);
             log.warn("TTS 실패 {} {}: {}", uri.getHost(), reply.status(),

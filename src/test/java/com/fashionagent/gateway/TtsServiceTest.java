@@ -62,5 +62,7 @@ class TtsServiceTest {
                 .isInstanceOfSatisfying(ApiError.class, e -> assertThat(e.code()).isEqualTo("tts_unavailable"));
         assertThatThrownBy(() -> new TtsService("k", null, 1.0, replying(403, "{}")).synthesize("안녕", null))
                 .isInstanceOfSatisfying(ApiError.class, e -> assertThat(e.code()).isEqualTo("tts_failed"));
+        assertThatThrownBy(() -> new TtsService(null, "g", 1.0, replying(429, "{}")).synthesize("안녕", null))
+                .isInstanceOfSatisfying(ApiError.class, e -> assertThat(e.code()).isEqualTo("tts_quota"));
     }
 }

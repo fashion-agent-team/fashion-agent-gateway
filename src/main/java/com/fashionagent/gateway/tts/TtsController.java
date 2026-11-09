@@ -27,6 +27,8 @@ public class TtsController {
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(audio.mimeType()))
                 .header("Cache-Control", "private, max-age=86400")
+                // 앱이 Gemini면 문장으로 나누지 않고 한 번에 받습니다(무료 횟수가 적음).
+                .header("X-Tts-Engine", tts.engine())
                 .body(audio.bytes());
     }
 }
