@@ -72,9 +72,10 @@ public class AuthFilter extends OncePerRequestFilter {
                 ApiError.write(response, e.status(), e.code(), e.getMessage());
                 return;
             }
-            // 구글 목소리는 문장마다 부르므로 말하기 횟수와 따로, 넉넉하게 셉니다.
-            boolean tts = path.startsWith("/api/v1/tts");
-            if (tts ? !limiter.tryAcquire("tts:" + userId, TTS_PER_MINUTE)
+            // 구글 목소리는 문장마다, 음성 인식은 말할 때마다 부르므로 말하기 횟수와 따로, 넉넉하게 셉니다.
+            // 음성 인식은 소리가 커서 사진으로 세지 않게 여기서 나눕니다.
+            String voice = path.startsWith("/api/v1/tts") ? "tts:" : path.startsWith("/api/v1/stt") ? "stt:" : null;
+            if (voice != null ? !limiter.tryAcquire(voice + userId, TTS_PER_MINUTE)
                     : !limiter.tryAcquire("all:" + userId, props.requestsPerMinute())
                     || (request.getContentLengthLong() > PHOTO_BYTES
                             && !limiter.tryAcquire("photo:" + userId, props.photosPerMinute()))) {
