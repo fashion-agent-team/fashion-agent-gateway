@@ -41,7 +41,8 @@ public class MeController {
             throw new ApiError(HttpStatus.BAD_REQUEST, "bad_request", "회원정보가 없어요.");
         }
         Profile p = new Profile(trim(body.name(), 50), body.birthDate(), trim(body.gender(), 20), trim(body.job(), 50),
-                body.heightCm(), body.weightKg(), trim(body.agentName(), 30));
+                body.heightCm(), body.weightKg(), trim(body.agentName(), 30),
+                trim(body.callName(), 30));
         check(p.heightCm(), 50, 250, "키는 50~250cm");
         check(p.weightKg(), 10, 300, "몸무게는 10~300kg");
         try {
