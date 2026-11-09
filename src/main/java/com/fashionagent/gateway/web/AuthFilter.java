@@ -37,6 +37,8 @@ public class AuthFilter extends OncePerRequestFilter {
     static final String HEADER = "X-User-Id";
     /** 이보다 큰 요청은 사진이 든 것으로 봅니다(말만 있는 요청은 1KB 안팎, 사진은 수백 KB). */
     static final long PHOTO_BYTES = 64 * 1024;
+    /** 사용자당 분당 TTS 문장 수. 안내 한 번이 서너 문장이라 넉넉하게. */
+    static final int TTS_PER_MINUTE = 120;
 
     private final JwtService jwt;
     private final RateLimiter limiter;
@@ -70,7 +72,10 @@ public class AuthFilter extends OncePerRequestFilter {
                 ApiError.write(response, e.status(), e.code(), e.getMessage());
                 return;
             }
-            if (!limiter.tryAcquire("all:" + userId, props.requestsPerMinute())
+            // 구글 목소리는 문장마다 부르므로 말하기 횟수와 따로, 넉넉하게 셉니다.
+            boolean tts = path.startsWith("/api/v1/tts");
+            if (tts ? !limiter.tryAcquire("tts:" + userId, TTS_PER_MINUTE)
+                    : !limiter.tryAcquire("all:" + userId, props.requestsPerMinute())
                     || (request.getContentLengthLong() > PHOTO_BYTES
                             && !limiter.tryAcquire("photo:" + userId, props.photosPerMinute()))) {
                 response.setHeader("Retry-After", "60");
