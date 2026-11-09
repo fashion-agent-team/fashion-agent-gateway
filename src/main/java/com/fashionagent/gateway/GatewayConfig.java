@@ -11,6 +11,7 @@ import org.springframework.core.Ordered;
 
 import com.fashionagent.gateway.auth.FirebaseVerifier;
 import com.fashionagent.gateway.auth.JwtService;
+import com.fashionagent.gateway.stt.SttService;
 import com.fashionagent.gateway.tts.TtsService;
 import com.fashionagent.gateway.web.AuthFilter;
 import com.fashionagent.gateway.web.RateLimiter;
@@ -47,6 +48,14 @@ public class GatewayConfig {
                 env.getProperty("TTS_SPEAKING_RATE", Double.class, 1.0), TtsService.httpSender());
         log.info("TTS: {}", tts.engine() == null ? "꺼짐(키 없음, 앱은 폰 목소리)" : tts.engine());
         return tts;
+    }
+
+    /** 음성 인식(약속 openapi /api/v1/stt). 키가 없으면 503을 돌려주고 앱은 폰 음성 인식 글자를 씁니다. */
+    @Bean
+    SttService sttService(org.springframework.core.env.Environment env) {
+        var stt = new SttService(env.getProperty("OPENAI_API_KEY"), env.getProperty("STT_MODEL"), SttService.httpSender());
+        log.info("STT: {}", stt.available() ? stt.model() : "꺼짐(OPENAI_API_KEY 없음, 앱은 폰 음성 인식)");
+        return stt;
     }
 
     @Bean
