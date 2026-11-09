@@ -134,10 +134,11 @@ class GatewayFlowTest {
         String device = "flow-" + UUID.randomUUID();
         String token = devLogin(device).path("accessToken").asString();
 
-        Res saved = call("PUT", "/api/v1/me/profile", token, "{\"name\":\" 진행 \",\"heightCm\":175.5,\"agentName\":\"코디\"}");
+        Res saved = call("PUT", "/api/v1/me/profile", token, "{\"name\":\" 진행 \",\"heightCm\":175.5,\"agentName\":\"코디\",\"callName\":\" 진행 님 \"}");
         assertThat(saved.status()).isEqualTo(200);
         assertThat(saved.body().path("name").asString()).isEqualTo("진행");
         assertThat(saved.body().path("gender").isNull()).isTrue();
+        assertThat(saved.body().path("callName").asString()).isEqualTo("진행 님");
         assertThat(call("PUT", "/api/v1/me/profile", token, "{\"heightCm\":400}").status()).isEqualTo(400);
 
         assertThat(devLogin(device).path("isNewUser").asBoolean()).isFalse();

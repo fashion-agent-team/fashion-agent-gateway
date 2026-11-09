@@ -25,8 +25,8 @@ public class AccountStore {
     }
 
     public record Profile(String name, LocalDate birthDate, String gender, String job, BigDecimal heightCm,
-            BigDecimal weightKg, String agentName) {
-        static final Profile EMPTY = new Profile(null, null, null, null, null, null, null);
+            BigDecimal weightKg, String agentName, String callName) {
+        static final Profile EMPTY = new Profile(null, null, null, null, null, null, null, null);
     }
 
     private final JdbcClient jdbc;
@@ -105,22 +105,23 @@ public class AccountStore {
     }
 
     public Profile profile(UUID userId) {
-        return jdbc.sql("SELECT name, birth_date, gender, job, height_cm, weight_kg, agent_name FROM profiles WHERE user_id = ?")
+        return jdbc.sql("SELECT name, birth_date, gender, job, height_cm, weight_kg, agent_name, call_name FROM profiles WHERE user_id = ?")
                 .param(userId)
                 .query((rs, i) -> new Profile(rs.getString(1), rs.getObject(2, LocalDate.class), rs.getString(3),
-                        rs.getString(4), rs.getBigDecimal(5), rs.getBigDecimal(6), rs.getString(7)))
+                        rs.getString(4), rs.getBigDecimal(5), rs.getBigDecimal(6), rs.getString(7), rs.getString(8)))
                 .optional().orElse(Profile.EMPTY);
     }
 
     /** 통째로 저장합니다(PUT). 건너뛴 항목은 null. */
     public Profile saveProfile(UUID userId, Profile p) {
         jdbc.sql("""
-                INSERT INTO profiles (user_id, name, birth_date, gender, job, height_cm, weight_kg, agent_name)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO profiles (user_id, name, birth_date, gender, job, height_cm, weight_kg, agent_name, call_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (user_id) DO UPDATE SET name = EXCLUDED.name, birth_date = EXCLUDED.birth_date,
                   gender = EXCLUDED.gender, job = EXCLUDED.job, height_cm = EXCLUDED.height_cm,
-                  weight_kg = EXCLUDED.weight_kg, agent_name = EXCLUDED.agent_name, updated_at = now()""")
-                .params(userId, p.name(), p.birthDate(), p.gender(), p.job(), p.heightCm(), p.weightKg(), p.agentName())
+                  weight_kg = EXCLUDED.weight_kg, agent_name = EXCLUDED.agent_name,
+                  call_name = EXCLUDED.call_name, updated_at = now()""")
+                .params(userId, p.name(), p.birthDate(), p.gender(), p.job(), p.heightCm(), p.weightKg(), p.agentName(), p.callName())
                 .update();
         return profile(userId);
     }
