@@ -11,6 +11,7 @@ import org.springframework.core.Ordered;
 
 import com.fashionagent.gateway.auth.FirebaseVerifier;
 import com.fashionagent.gateway.auth.JwtService;
+import com.fashionagent.gateway.tts.TtsService;
 import com.fashionagent.gateway.web.AuthFilter;
 import com.fashionagent.gateway.web.RateLimiter;
 
@@ -37,6 +38,15 @@ public class GatewayConfig {
             return null;
         }
         return new FirebaseVerifier(props.firebaseProjectId().strip(), clock);
+    }
+
+    /** 구글 목소리(약속 openapi /api/v1/tts). 키가 없으면 503을 돌려주고 앱은 폰 목소리로 읽습니다. */
+    @Bean
+    TtsService ttsService(org.springframework.core.env.Environment env) {
+        var tts = new TtsService(env.getProperty("GOOGLE_TTS_API_KEY"), env.getProperty("GEMINI_API_KEY"),
+                env.getProperty("TTS_SPEAKING_RATE", Double.class, 1.0), TtsService.httpSender());
+        log.info("TTS: {}", tts.engine() == null ? "꺼짐(키 없음, 앱은 폰 목소리)" : tts.engine());
+        return tts;
     }
 
     @Bean
