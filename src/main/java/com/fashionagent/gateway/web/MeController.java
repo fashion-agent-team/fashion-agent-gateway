@@ -42,9 +42,13 @@ public class MeController {
         }
         Profile p = new Profile(trim(body.name(), 50), body.birthDate(), trim(body.gender(), 20), trim(body.job(), 50),
                 body.heightCm(), body.weightKg(), trim(body.agentName(), 30),
-                trim(body.callName(), 30));
+                trim(body.callName(), 30), body.speechRate());
         check(p.heightCm(), 50, 250, "키는 50~250cm");
         check(p.weightKg(), 10, 300, "몸무게는 10~300kg");
+        if (p.speechRate() != null && (p.speechRate().compareTo(new BigDecimal("0.1")) < 0
+                || p.speechRate().compareTo(BigDecimal.ONE) > 0)) {
+            throw new ApiError(HttpStatus.BAD_REQUEST, "bad_request", "말 빠르기는 0.1~1.0만 받아요.");
+        }
         try {
             return accounts.saveProfile(userId, p);
         } catch (DataIntegrityViolationException e) {
