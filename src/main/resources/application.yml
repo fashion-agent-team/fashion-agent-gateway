@@ -40,15 +40,6 @@ spring:
               uri: ${SCHEDULE_URL:http://localhost:8092}
               predicates:
                 - Path=/api/v1/schedules/**
-            - id: helper-contacts
-              uri: ${HELPER_URL:http://localhost:8096}
-              predicates:
-                - Path=/api/v1/me/contacts,/api/v1/me/contacts/**
-            # 가족 답장 웹 페이지(로그인 없음, 토큰 링크)
-            - id: helper-page
-              uri: ${HELPER_URL:http://localhost:8096}
-              predicates:
-                - Path=/h/**
 
 gateway:
   jwt-secret: ${JWT_SECRET:}

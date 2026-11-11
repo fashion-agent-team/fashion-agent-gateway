@@ -22,7 +22,6 @@
 | `PUT /api/v1/me/push-token` | FCM 토큰 등록 |
 | `/api/v1/agent/** → agent:8081` | agent로 전달 |
 | `/api/v1/schedules/** → mcp-schedule:8092` | 일정 조회 전달 |
-| `/api/v1/me/contacts/**, /h/** → mcp-helper:8096` | 가족·친구 연락처, 가족 답장 웹 페이지 전달 |
 
 입출력 JSON은 [OpenAPI](https://github.com/fashion-agent-team/fashion-agent/blob/develop/docs/contracts/openapi.yaml)를 그대로 따릅니다.
 
@@ -50,7 +49,7 @@ curl -X POST localhost:8080/api/v1/auth/dev -H 'Content-Type: application/json' 
 | --- | --- |
 | `JWT_SECRET` | dev는 비우면 켤 때마다 임시 값(다시 켜면 토큰 무효), prod는 꼭 필요(32바이트 이상) |
 | `FIREBASE_PROJECT_ID` | 없음 → Apple·구글 로그인 꺼짐 |
-| `AGENT_URL`, `HELPER_URL`, `SCHEDULE_URL` | `http://localhost:8081`, `:8096`, `:8092` |
+| `AGENT_URL`, `SCHEDULE_URL` | `http://localhost:8081`, `:8092` |
 | `SPRING_DATASOURCE_URL`·`_USERNAME`·`_PASSWORD` | `jdbc:postgresql://localhost:5432/fashion`, `fashion` |
 
 테스트는 `./gradlew test`. DB가 필요한 흐름 테스트(로그인 → JWT → X-User-Id → 뒤쪽 서비스)는 `GATEWAY_TEST_DB_URL=jdbc:postgresql://localhost:5432/fashion`(`GATEWAY_TEST_DB_USER`, `GATEWAY_TEST_DB_PASSWORD`)이 있을 때만 돕니다.
@@ -59,7 +58,7 @@ curl -X POST localhost:8080/api/v1/auth/dev -H 'Content-Type: application/json' 
 
 - [x] Spring Boot 뼈대 + `/actuator/health` + Dockerfile
 - [x] `/api/v1/auth/dev` + JWT 발급·검증 필터 + `X-User-Id` 붙이기
-- [x] agent·mcp-helper·mcp-schedule로 라우팅
+- [x] agent·mcp-schedule로 라우팅 (mcp-helper는 2026-11-11 뺌)
 - [x] 회원정보 API (`account` 스키마), 푸시 토큰
 - [x] Firebase 로그인 (`/api/v1/auth/login`, 구글 공개 키로 확인), 리프레시
 - [x] 사용량 제한 (메모리)
