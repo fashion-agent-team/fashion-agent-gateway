@@ -103,4 +103,51 @@ class TtsServiceTest {
         azureOnly.synthesize("반가워", null);
         assertThat(sent).allSatisfy(b -> assertThat(b).contains("ko-KR-YuJinNeural"));
     }
+
+    @Test
+    void EDGE_TTS_URL이_있으면_선희로_읽고_다른_이름도_선희로_읽는다() {
+        List<java.net.URI> uris = new ArrayList<>();
+        TtsService.Sender edge = (uri, headers, body) -> {
+            uris.add(uri);
+            sent.add(body);
+            return new TtsService.Reply(200, new byte[] { 5, 5 });
+        };
+        var tts = new TtsService("cloud-key", null, null, null, "http://edge-tts:8099/", 0.9, edge);
+
+        var audio = tts.synthesize("안녕하세요, 심청이예요.", "SunHi");
+        tts.synthesize("반가워요", "YuJin");
+        tts.synthesize("남자 목소리", "InJoon");
+
+        assertThat(audio.mimeType()).isEqualTo("audio/mpeg");
+        assertThat(audio.bytes()).containsExactly(5, 5);
+        assertThat(uris.get(0).toString()).isEqualTo("http://edge-tts:8099/tts");
+        assertThat(sent.get(0)).contains("\"voice\":\"ko-KR-SunHiNeural\"").contains("\"rate\":\"-10%\"")
+                .contains("안녕하세요, 심청이예요.");
+        assertThat(sent.get(1)).contains("ko-KR-SunHiNeural");
+        assertThat(sent.get(2)).contains("ko-KR-InJoonNeural");
+        assertThat(tts.engineFor("Achernar")).isEqualTo("cloud");
+        assertThat(tts.engineFor(null)).isEqualTo("edge");
+    }
+
+    @Test
+    void Azure_키가_있으면_유진은_Azure_선희는_엣지() {
+        var tts = new TtsService(null, null, "azure-key", null, "http://edge-tts:8099", 1.0, replying(200, "x"));
+        assertThat(tts.engineFor("YuJin")).isEqualTo("azure");
+        assertThat(tts.engineFor("SunHi")).isEqualTo("edge");
+        assertThat(tts.engineFor("Achernar")).isEqualTo("edge");
+    }
+
+    @Test
+    void 사이드카가_실패하면_502() {
+        assertThatThrownBy(() -> new TtsService(null, null, null, null, "http://edge-tts:8099", 1.0,
+                replying(502, "{\"error\":\"edge_failed\"}")).synthesize("안녕", "SunHi"))
+                .isInstanceOfSatisfying(ApiError.class, e -> assertThat(e.code()).isEqualTo("tts_failed"));
+    }
+
+    @Test
+    void 엣지_빠르기_문자열() {
+        assertThat(TtsService.edgeRate(1.0)).isEqualTo("+0%");
+        assertThat(TtsService.edgeRate(1.2)).isEqualTo("+20%");
+        assertThat(TtsService.edgeRate(0.85)).isEqualTo("-15%");
+    }
 }
