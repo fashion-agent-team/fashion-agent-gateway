@@ -150,4 +150,24 @@ class TtsServiceTest {
         assertThat(TtsService.edgeRate(1.2)).isEqualTo("+20%");
         assertThat(TtsService.edgeRate(0.85)).isEqualTo("-15%");
     }
+
+    @Test
+    void Azure가_실패하면_엣지_선희로_대신_읽는다() {
+        TtsService.Sender sender = (uri, headers, body) -> {
+            hosts.add(uri.getHost());
+            sent.add(body);
+            return uri.getHost().contains("microsoft")
+                    ? new TtsService.Reply(500, "{}".getBytes(StandardCharsets.UTF_8))
+                    : new TtsService.Reply(200, new byte[] { 3 });
+        };
+        var tts = new TtsService(null, null, "azure-key", null, "http://edge-tts:8099", 1.0, sender);
+
+        var audio = tts.synthesize("안녕", "YuJin");
+        tts.synthesize("안녕", "YuJin");
+
+        assertThat(audio.bytes()).containsExactly(3);
+        assertThat(hosts).containsExactly("koreacentral.tts.speech.microsoft.com", "edge-tts",
+                "koreacentral.tts.speech.microsoft.com", "edge-tts");
+        assertThat(sent.get(1)).contains("ko-KR-SunHiNeural");
+    }
 }
