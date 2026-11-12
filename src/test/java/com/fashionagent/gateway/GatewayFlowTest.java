@@ -56,7 +56,7 @@ class GatewayFlowTest {
         });
         agent.start();
         try (ServerSocket s = new ServerSocket(0)) {
-            deadPort = s.getLocalPort(); // 닫힌 포트 = 꺼진 helper
+            deadPort = s.getLocalPort(); // 닫힌 포트 = 꺼진 schedule
         }
     }
 
@@ -74,7 +74,7 @@ class GatewayFlowTest {
         r.add("spring.datasource.password", () -> System.getenv().getOrDefault("GATEWAY_TEST_DB_PASSWORD", "postgres"));
         r.add("gateway.dev-login", () -> "true");
         r.add("AGENT_URL", () -> "http://127.0.0.1:" + agent.getAddress().getPort());
-        r.add("HELPER_URL", () -> "http://127.0.0.1:" + deadPort);
+        r.add("SCHEDULE_URL", () -> "http://127.0.0.1:" + deadPort);
     }
 
     @LocalServerPort
@@ -161,7 +161,7 @@ class GatewayFlowTest {
     @Test
     void 뒤쪽_서비스가_꺼져_있으면_502_upstream_failed() throws Exception {
         String token = devLogin("flow-" + UUID.randomUUID()).path("accessToken").asString();
-        Res r = call("GET", "/api/v1/me/contacts", token, null);
+        Res r = call("GET", "/api/v1/schedules", token, null);
         assertThat(r.status()).isEqualTo(502);
         assertThat(r.body().path("error").path("code").asString()).isEqualTo("upstream_failed");
     }

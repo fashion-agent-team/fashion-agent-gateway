@@ -113,8 +113,7 @@ public class AuthFilter extends OncePerRequestFilter {
 
     /** application.yml의 라우트로 뒤쪽 서비스에 넘기는 경로. */
     static boolean isProxied(String path) {
-        return path.startsWith("/api/v1/agent/") || path.startsWith("/api/v1/schedules")
-                || path.startsWith("/api/v1/me/contacts") || path.startsWith("/h/");
+        return path.startsWith("/api/v1/agent/") || path.startsWith("/api/v1/schedules");
     }
 
     private static Throwable rootCause(Throwable e) {
