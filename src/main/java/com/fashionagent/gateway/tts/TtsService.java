@@ -34,6 +34,9 @@ import tools.jackson.databind.json.JsonMapper;
  * </ol>
  * 2026-11-12: 심청이 같은 젊은 여자 목소리(유진·지민·서현)와 할머니 목소리(순복)는 Azure Speech로 읽습니다(AZURE_SPEECH_KEY·AZURE_SPEECH_REGION).
  * 무료 등급(F0)은 신경망 목소리 한 달 50만 자까지 무료입니다. Azure 키가 없으면 위 순서대로 구글 기본 목소리로 읽습니다.
+ * 2026-11-12(진행 님 결정, 발표용): EDGE_TTS_URL이 있으면 엣지 브라우저 목소리(선희·인준·현수)를 edge-tts 사이드카로 읽습니다.
+ * 키가 필요 없고 무료지만 비공식이라 상업 출시 때는 Azure 같은 정식 서비스로 바꿉니다. 다른 엔진보다 먼저 씁니다
+ * (Azure 키가 없으면 유진·지민 같은 이름도 선희로 읽음).
  * 같은 목소리·문장은 메모리에 기억해 두고 다시 받지 않습니다(인사·추임새·자주 하는 안내).
  */
 public class TtsService {
@@ -53,6 +56,13 @@ public class TtsService {
             "SeoHyeon", "ko-KR-SeoHyeonNeural",
             "SoonBok", "ko-KR-SoonBokNeural");
     public static final String DEFAULT_AZURE_VOICE = "YuJin";
+
+    /** 엣지 브라우저 한국어 목소리(edge-tts 사이드카). 앱이 보내는 이름 → 엣지 목소리 이름. */
+    public static final Map<String, String> EDGE_VOICES = Map.of(
+            "SunHi", "ko-KR-SunHiNeural",
+            "InJoon", "ko-KR-InJoonNeural",
+            "Hyunsu", "ko-KR-HyunsuMultilingualNeural");
+    public static final String DEFAULT_EDGE_VOICE = "SunHi";
     static final int MAX_CHARS = 500;
     static final int CACHE_SIZE = 300;
 
@@ -76,6 +86,7 @@ public class TtsService {
     private final String geminiKey;
     private final String azureKey;
     private final String azureRegion;
+    private final String edgeUrl;
     private final double speakingRate;
     private final Sender sender;
     private final Map<String, Audio> cache = new LinkedHashMap<>(64, 0.75f, true) {
@@ -91,6 +102,14 @@ public class TtsService {
 
     public TtsService(String cloudKey, String geminiKey, String azureKey, String azureRegion, double speakingRate,
             Sender sender) {
+        this(cloudKey, geminiKey, azureKey, azureRegion, null, speakingRate, sender);
+    }
+
+    /** @param edgeUrl edge-tts 사이드카 주소(예: http://edge-tts:8099). 비우면 엣지 목소리를 쓰지 않습니다. */
+    public TtsService(String cloudKey, String geminiKey, String azureKey, String azureRegion, String edgeUrl,
+            double speakingRate, Sender sender) {
+        String e = blankToNull(edgeUrl);
+        this.edgeUrl = e == null ? null : e.replaceAll("/+$", "");
         this.cloudKey = blankToNull(cloudKey);
         this.geminiKey = blankToNull(geminiKey);
         this.azureKey = blankToNull(azureKey);
@@ -120,8 +139,20 @@ public class TtsService {
 
     /** 이 목소리를 읽을 엔진(azure, cloud, gemini) 또는 null. */
     public String engineFor(String voice) {
-        // 구글 키가 없으면 다른 목소리도 Azure 기본 목소리(유진)로 읽습니다.
-        if (azureKey != null && ((voice != null && AZURE_VOICES.containsKey(voice)) || engine() == null)) {
+        if (edgeUrl != null && voice != null && EDGE_VOICES.containsKey(voice)) {
+            return "edge";
+        }
+        if (azureKey != null && voice != null && AZURE_VOICES.containsKey(voice)) {
+            return "azure";
+        }
+        if (voice != null && VOICES.contains(voice) && engine() != null) {
+            return engine();
+        }
+        // 그 밖의 목소리(Azure 키 없는 유진 등)는 엣지 선희, 그다음 Azure 유진, 그다음 구글 기본 목소리로 읽습니다.
+        if (edgeUrl != null) {
+            return "edge";
+        }
+        if (azureKey != null) {
             return "azure";
         }
         return engine();
@@ -138,12 +169,14 @@ public class TtsService {
         String engine = engineFor(voice);
         if (engine == null) {
             throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, "tts_unavailable",
-                    "TTS 키(AZURE_SPEECH_KEY, GOOGLE_TTS_API_KEY 또는 GEMINI_API_KEY)가 없어요.");
+                    "TTS 설정(EDGE_TTS_URL, AZURE_SPEECH_KEY, GOOGLE_TTS_API_KEY 또는 GEMINI_API_KEY)이 없어요.");
         }
-        // Azure 키가 없는데 Azure 목소리를 고르면 구글 기본 목소리로 읽습니다.
-        String v = "azure".equals(engine)
-                ? (voice != null && AZURE_VOICES.containsKey(voice) ? voice : DEFAULT_AZURE_VOICE)
-                : (voice != null && VOICES.contains(voice) ? voice : DEFAULT_VOICE);
+        // 고른 목소리가 그 엔진에 없으면 그 엔진의 기본 목소리로 읽습니다.
+        String v = switch (engine) {
+            case "edge" -> voice != null && EDGE_VOICES.containsKey(voice) ? voice : DEFAULT_EDGE_VOICE;
+            case "azure" -> voice != null && AZURE_VOICES.containsKey(voice) ? voice : DEFAULT_AZURE_VOICE;
+            default -> voice != null && VOICES.contains(voice) ? voice : DEFAULT_VOICE;
+        };
         String key = engine + "|" + v + "|" + t;
         synchronized (cache) {
             Audio hit = cache.get(key);
@@ -153,6 +186,7 @@ public class TtsService {
         }
         long started = System.nanoTime();
         Audio audio = switch (engine) {
+            case "edge" -> edge(t, v);
             case "azure" -> azure(t, v);
             case "cloud" -> cloud(t, v);
             default -> gemini(t, v);
@@ -195,6 +229,21 @@ public class TtsService {
             throw failed("Azure TTS가 빈 소리를 보냈어요.");
         }
         return new Audio(reply.body(), "audio/mpeg");
+    }
+
+    private Audio edge(String text, String voice) {
+        Map<String, Object> body = Map.of("text", text, "voice", EDGE_VOICES.get(voice), "rate", edgeRate(speakingRate));
+        Reply reply = send(URI.create(edgeUrl + "/tts"), Map.of(), JSON.writeValueAsString(body));
+        if (reply.body() == null || reply.body().length == 0) {
+            throw failed("Edge TTS가 빈 소리를 보냈어요.");
+        }
+        return new Audio(reply.body(), "audio/mpeg");
+    }
+
+    /** 빠르기 1.0 → "+0%", 0.9 → "-10%", 1.2 → "+20%". */
+    public static String edgeRate(double rate) {
+        long pct = Math.round((rate - 1.0) * 100);
+        return (pct < 0 ? "-" : "+") + Math.abs(pct) + "%";
     }
 
     /** SSML 안에 넣을 수 있게 특수 문자를 바꿉니다. */
