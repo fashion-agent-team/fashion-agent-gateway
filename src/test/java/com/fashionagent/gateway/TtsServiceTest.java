@@ -170,4 +170,20 @@ class TtsServiceTest {
                 "koreacentral.tts.speech.microsoft.com", "edge-tts");
         assertThat(sent.get(1)).contains("ko-KR-SunHiNeural");
     }
+
+    @Test
+    void Azure를_1분에_18번_넘게_쓰면_엣지로_읽는다() {
+        TtsService.Sender sender = (uri, headers, body) -> {
+            hosts.add(uri.getHost());
+            return new TtsService.Reply(200, new byte[] { 1 });
+        };
+        var tts = new TtsService(null, null, "azure-key", null, "http://edge-tts:8099", 1.0, sender);
+
+        for (int i = 0; i < 20; i++) {
+            tts.synthesize("문장 " + i, "YuJin");
+        }
+
+        assertThat(hosts.subList(0, 18)).allMatch(h -> h.contains("microsoft"));
+        assertThat(hosts.subList(18, 20)).containsOnly("edge-tts");
+    }
 }
