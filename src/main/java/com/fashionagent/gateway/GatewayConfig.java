@@ -45,8 +45,11 @@ public class GatewayConfig {
     @Bean
     TtsService ttsService(org.springframework.core.env.Environment env) {
         var tts = new TtsService(env.getProperty("GOOGLE_TTS_API_KEY"), env.getProperty("GEMINI_API_KEY"),
+                env.getProperty("AZURE_SPEECH_KEY"), env.getProperty("AZURE_SPEECH_REGION"),
                 env.getProperty("TTS_SPEAKING_RATE", Double.class, 1.0), TtsService.httpSender());
-        log.info("TTS: {}", tts.engine() == null ? "꺼짐(키 없음, 앱은 폰 목소리)" : tts.engine());
+        log.info("TTS: 유진·지민·서현·순복 {}, 그 밖의 목소리 {}",
+                "azure".equals(tts.engineFor("YuJin")) ? "Azure" : "꺼짐",
+                tts.engine() == null ? "꺼짐(키 없음, 앱은 폰 목소리)" : tts.engine());
         return tts;
     }
 

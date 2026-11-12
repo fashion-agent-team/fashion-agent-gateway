@@ -65,4 +65,42 @@ class TtsServiceTest {
         assertThatThrownBy(() -> new TtsService(null, "g", 1.0, replying(429, "{}")).synthesize("안녕", null))
                 .isInstanceOfSatisfying(ApiError.class, e -> assertThat(e.code()).isEqualTo("tts_quota"));
     }
+
+    @Test
+    void Azure_키가_있으면_유진_지민_서현은_Azure로_읽는다() {
+        List<java.util.Map<String, String>> heads = new ArrayList<>();
+        TtsService.Sender azure = (uri, headers, body) -> {
+            hosts.add(uri.getHost());
+            heads.add(headers);
+            sent.add(body);
+            return new TtsService.Reply(200, new byte[] { 7, 7 });
+        };
+        var tts = new TtsService("cloud-key", null, "azure-key", "koreacentral", 1.0, azure);
+
+        var audio = tts.synthesize("심청이 <안녕> & 반가워요", "SeoHyeon");
+
+        assertThat(tts.engineFor("SeoHyeon")).isEqualTo("azure");
+        assertThat(tts.engineFor("Achernar")).isEqualTo("cloud");
+        assertThat(audio.mimeType()).isEqualTo("audio/mpeg");
+        assertThat(audio.bytes()).containsExactly(7, 7);
+        assertThat(hosts).containsExactly("koreacentral.tts.speech.microsoft.com");
+        assertThat(heads.get(0)).containsEntry("Ocp-Apim-Subscription-Key", "azure-key")
+                .containsEntry("Content-Type", "application/ssml+xml");
+        assertThat(sent.get(0)).contains("ko-KR-SeoHyeonNeural").contains("심청이 &lt;안녕&gt; &amp; 반가워요");
+    }
+
+    @Test
+    void Azure_키가_없으면_유진도_구글_기본_목소리로_읽고_구글_키가_없으면_Azure_유진으로_읽는다() {
+        String mp3 = Base64.getEncoder().encodeToString(new byte[] { 1 });
+        var googleOnly = new TtsService("cloud-key", null, 1.0, replying(200, "{\"audioContent\":\"" + mp3 + "\"}"));
+        googleOnly.synthesize("안녕", "YuJin");
+        assertThat(googleOnly.engineFor("YuJin")).isEqualTo("cloud");
+        assertThat(sent.get(0)).contains("ko-KR-Chirp3-HD-Achernar");
+
+        sent.clear();
+        var azureOnly = new TtsService(null, null, "azure-key", null, 1.0, replying(200, "x"));
+        azureOnly.synthesize("안녕", "Achernar");
+        azureOnly.synthesize("반가워", null);
+        assertThat(sent).allSatisfy(b -> assertThat(b).contains("ko-KR-YuJinNeural"));
+    }
 }

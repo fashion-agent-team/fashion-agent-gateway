@@ -32,6 +32,8 @@ import tools.jackson.databind.json.JsonMapper;
  * <li>없으면 GEMINI_API_KEY로 Gemini TTS(같은 이름의 목소리, WAV). 무료지만 하루 횟수가 적고 느립니다.</li>
  * <li>둘 다 없으면 503 tts_unavailable. 앱은 폰 목소리로 읽습니다.</li>
  * </ol>
+ * 2026-11-12: 심청이 같은 젊은 여자 목소리(유진·지민·서현)와 할머니 목소리(순복)는 Azure Speech로 읽습니다(AZURE_SPEECH_KEY·AZURE_SPEECH_REGION).
+ * 무료 등급(F0)은 신경망 목소리 한 달 50만 자까지 무료입니다. Azure 키가 없으면 위 순서대로 구글 기본 목소리로 읽습니다.
  * 같은 목소리·문장은 메모리에 기억해 두고 다시 받지 않습니다(인사·추임새·자주 하는 안내).
  */
 public class TtsService {
@@ -43,6 +45,14 @@ public class TtsService {
     public static final Set<String> VOICES = Set.of("Achernar", "Sulafat", "Vindemiatrix", "Aoede", "Achird",
             "Umbriel", "Kore", "Leda", "Zephyr", "Callirrhoe", "Charon", "Puck");
     public static final String DEFAULT_VOICE = "Achernar";
+
+    /** Azure 한국어 신경망 목소리. 앱이 보내는 이름 → Azure 목소리 이름. */
+    public static final Map<String, String> AZURE_VOICES = Map.of(
+            "YuJin", "ko-KR-YuJinNeural",
+            "JiMin", "ko-KR-JiMinNeural",
+            "SeoHyeon", "ko-KR-SeoHyeonNeural",
+            "SoonBok", "ko-KR-SoonBokNeural");
+    public static final String DEFAULT_AZURE_VOICE = "YuJin";
     static final int MAX_CHARS = 500;
     static final int CACHE_SIZE = 300;
 
@@ -64,6 +74,8 @@ public class TtsService {
 
     private final String cloudKey;
     private final String geminiKey;
+    private final String azureKey;
+    private final String azureRegion;
     private final double speakingRate;
     private final Sender sender;
     private final Map<String, Audio> cache = new LinkedHashMap<>(64, 0.75f, true) {
@@ -74,8 +86,15 @@ public class TtsService {
     };
 
     public TtsService(String cloudKey, String geminiKey, double speakingRate, Sender sender) {
+        this(cloudKey, geminiKey, null, null, speakingRate, sender);
+    }
+
+    public TtsService(String cloudKey, String geminiKey, String azureKey, String azureRegion, double speakingRate,
+            Sender sender) {
         this.cloudKey = blankToNull(cloudKey);
         this.geminiKey = blankToNull(geminiKey);
+        this.azureKey = blankToNull(azureKey);
+        this.azureRegion = blankToNull(azureRegion) == null ? "koreacentral" : azureRegion.strip();
         this.speakingRate = speakingRate <= 0 ? 1.0 : speakingRate;
         this.sender = sender;
     }
@@ -87,15 +106,25 @@ public class TtsService {
             var req = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(15))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(json));
-            headers.forEach(req::header);
+            // Azure는 Content-Type이 SSML이라 덮어씁니다.
+            headers.forEach(req::setHeader);
             HttpResponse<byte[]> res = client.send(req.build(), HttpResponse.BodyHandlers.ofByteArray());
             return new Reply(res.statusCode(), res.body());
         };
     }
 
-    /** 쓸 수 있는 엔진 이름(cloud, gemini) 또는 null. */
+    /** 구글 목소리를 읽는 엔진 이름(cloud, gemini) 또는 null. */
     public String engine() {
         return cloudKey != null ? "cloud" : geminiKey != null ? "gemini" : null;
+    }
+
+    /** 이 목소리를 읽을 엔진(azure, cloud, gemini) 또는 null. */
+    public String engineFor(String voice) {
+        // 구글 키가 없으면 다른 목소리도 Azure 기본 목소리(유진)로 읽습니다.
+        if (azureKey != null && ((voice != null && AZURE_VOICES.containsKey(voice)) || engine() == null)) {
+            return "azure";
+        }
+        return engine();
     }
 
     public Audio synthesize(String text, String voice) {
@@ -106,12 +135,15 @@ public class TtsService {
         if (t.length() > MAX_CHARS) {
             throw new ApiError(HttpStatus.BAD_REQUEST, "bad_request", "문장이 너무 길어요(500자까지).");
         }
-        String v = voice != null && VOICES.contains(voice) ? voice : DEFAULT_VOICE;
-        String engine = engine();
+        String engine = engineFor(voice);
         if (engine == null) {
             throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, "tts_unavailable",
-                    "TTS 키(GOOGLE_TTS_API_KEY 또는 GEMINI_API_KEY)가 없어요.");
+                    "TTS 키(AZURE_SPEECH_KEY, GOOGLE_TTS_API_KEY 또는 GEMINI_API_KEY)가 없어요.");
         }
+        // Azure 키가 없는데 Azure 목소리를 고르면 구글 기본 목소리로 읽습니다.
+        String v = "azure".equals(engine)
+                ? (voice != null && AZURE_VOICES.containsKey(voice) ? voice : DEFAULT_AZURE_VOICE)
+                : (voice != null && VOICES.contains(voice) ? voice : DEFAULT_VOICE);
         String key = engine + "|" + v + "|" + t;
         synchronized (cache) {
             Audio hit = cache.get(key);
@@ -120,7 +152,11 @@ public class TtsService {
             }
         }
         long started = System.nanoTime();
-        Audio audio = "cloud".equals(engine) ? cloud(t, v) : gemini(t, v);
+        Audio audio = switch (engine) {
+            case "azure" -> azure(t, v);
+            case "cloud" -> cloud(t, v);
+            default -> gemini(t, v);
+        };
         log.info("TTS {} {} {}자 {}ms", engine, v, t.length(), (System.nanoTime() - started) / 1_000_000);
         synchronized (cache) {
             cache.put(key, audio);
@@ -144,6 +180,29 @@ public class TtsService {
         return new Audio(Base64.getDecoder().decode(b64), "audio/mpeg");
     }
 
+    private Audio azure(String text, String voice) {
+        String ssml = "<speak version='1.0' xml:lang='ko-KR'><voice name='" + AZURE_VOICES.get(voice) + "'>"
+                + (speakingRate == 1.0 ? xml(text)
+                        : "<prosody rate='" + speakingRate + "'>" + xml(text) + "</prosody>")
+                + "</voice></speak>";
+        Reply reply = send(URI.create("https://" + azureRegion + ".tts.speech.microsoft.com/cognitiveservices/v1"),
+                Map.of("Ocp-Apim-Subscription-Key", azureKey,
+                        "Content-Type", "application/ssml+xml",
+                        "X-Microsoft-OutputFormat", "audio-24khz-48kbitrate-mono-mp3",
+                        "User-Agent", "fashion-agent-gateway"),
+                ssml);
+        if (reply.body() == null || reply.body().length == 0) {
+            throw failed("Azure TTS가 빈 소리를 보냈어요.");
+        }
+        return new Audio(reply.body(), "audio/mpeg");
+    }
+
+    /** SSML 안에 넣을 수 있게 특수 문자를 바꿉니다. */
+    static String xml(String text) {
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                .replace("\"", "&quot;").replace("'", "&apos;");
+    }
+
     private Audio gemini(String text, String voice) {
         Map<String, Object> body = Map.of(
                 "contents", List.of(Map.of("parts", List.of(Map.of("text",
@@ -163,9 +222,13 @@ public class TtsService {
     }
 
     private JsonNode post(URI uri, Map<String, String> headers, Map<String, Object> body) {
+        return JSON.readTree(send(uri, headers, JSON.writeValueAsString(body)).body());
+    }
+
+    private Reply send(URI uri, Map<String, String> headers, String body) {
         Reply reply;
         try {
-            reply = sender.post(uri, headers, JSON.writeValueAsString(body));
+            reply = sender.post(uri, headers, body);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw failed("TTS 요청이 끊겼어요.");
@@ -183,7 +246,7 @@ public class TtsService {
                     detail.length() > 300 ? detail.substring(0, 300) : detail);
             throw failed("TTS 서버가 " + reply.status() + "로 답했어요.");
         }
-        return JSON.readTree(reply.body());
+        return reply;
     }
 
     private static ApiError failed(String message) {
