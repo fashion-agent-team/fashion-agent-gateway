@@ -185,12 +185,23 @@ public class TtsService {
             }
         }
         long started = System.nanoTime();
-        Audio audio = switch (engine) {
-            case "edge" -> edge(t, v);
-            case "azure" -> azure(t, v);
-            case "cloud" -> cloud(t, v);
-            default -> gemini(t, v);
-        };
+        Audio audio;
+        try {
+            audio = switch (engine) {
+                case "edge" -> edge(t, v);
+                case "azure" -> azure(t, v);
+                case "cloud" -> cloud(t, v);
+                default -> gemini(t, v);
+            };
+        } catch (ApiError e) {
+            // 2026-11-12: Azure(유진)가 실패하면 엣지 선희로 대신 읽습니다. 앱이 폰 목소리로 넘어가는 것보다 낫습니다.
+            // 대신 읽은 소리는 기억하지 않습니다(다음에는 다시 Azure로).
+            if (!"azure".equals(engine) || edgeUrl == null) {
+                throw e;
+            }
+            log.warn("TTS azure 실패({}), 엣지 선희로 대신 읽어요", e.code());
+            return edge(t, DEFAULT_EDGE_VOICE);
+        }
         log.info("TTS {} {} {}자 {}ms", engine, v, t.length(), (System.nanoTime() - started) / 1_000_000);
         synchronized (cache) {
             cache.put(key, audio);
