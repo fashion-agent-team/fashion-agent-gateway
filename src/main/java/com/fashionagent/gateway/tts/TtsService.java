@@ -8,7 +8,9 @@ import java.net.http.HttpResponse;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.util.Base64;
+import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -65,6 +67,8 @@ public class TtsService {
     public static final String DEFAULT_EDGE_VOICE = "SunHi";
     static final int MAX_CHARS = 500;
     static final int CACHE_SIZE = 300;
+    /** Azure 무료 등급(F0)은 1분에 20번까지. 넘기 전에 엣지로 돌립니다(2026-11-12: 두세 번째 문장부터 폰 목소리). */
+    static final int AZURE_PER_MINUTE = 18;
 
     static final String CLOUD_URL = "https://texttospeech.googleapis.com/v1/text:synthesize";
     static final String GEMINI_URL =
@@ -87,6 +91,7 @@ public class TtsService {
     private final String azureKey;
     private final String azureRegion;
     private final String edgeUrl;
+    private final Deque<Long> azureCalls = new ArrayDeque<>();
     private final double speakingRate;
     private final Sender sender;
     private final Map<String, Audio> cache = new LinkedHashMap<>(64, 0.75f, true) {
@@ -185,6 +190,11 @@ public class TtsService {
             }
         }
         long started = System.nanoTime();
+        if ("azure".equals(engine) && edgeUrl != null && !azureBudget()) {
+            // 이번 1분 동안 Azure를 많이 썼으면 엣지 선희로 읽습니다. 기억하지 않아서 나중엔 다시 유진으로 받습니다.
+            log.info("TTS azure 1분 {}번 넘음, 엣지 선희로 읽어요", AZURE_PER_MINUTE);
+            return edge(t, DEFAULT_EDGE_VOICE);
+        }
         Audio audio;
         try {
             audio = switch (engine) {
@@ -240,6 +250,21 @@ public class TtsService {
             throw failed("Azure TTS가 빈 소리를 보냈어요.");
         }
         return new Audio(reply.body(), "audio/mpeg");
+    }
+
+    /** 최근 1분 동안 Azure 요청이 [AZURE_PER_MINUTE]번보다 적으면 한 번 쓰고 true. */
+    private boolean azureBudget() {
+        long now = System.nanoTime();
+        synchronized (azureCalls) {
+            while (!azureCalls.isEmpty() && now - azureCalls.peekFirst() > 60_000_000_000L) {
+                azureCalls.pollFirst();
+            }
+            if (azureCalls.size() >= AZURE_PER_MINUTE) {
+                return false;
+            }
+            azureCalls.addLast(now);
+            return true;
+        }
     }
 
     private Audio edge(String text, String voice) {
