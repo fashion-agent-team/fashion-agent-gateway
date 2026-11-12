@@ -245,7 +245,11 @@ public class TtsService {
     }
 
     private Audio azure(String text, String voice, double speakingRate) {
-        String ssml = "<speak version='1.0' xml:lang='ko-KR'><voice name='" + AZURE_VOICES.get(voice) + "'>"
+        // 앞뒤 무음을 없앱니다(2026-11-12: 조각을 이어 틀 때 무음이 두 번 들어가 문장 사이가 길었다). 문장 사이 쉼은 그대로.
+        String ssml = "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis'"
+                + " xmlns:mstts='http://www.w3.org/2001/mstts' xml:lang='ko-KR'><voice name='"
+                + AZURE_VOICES.get(voice) + "'>"
+                + "<mstts:silence type='Leading-exact' value='0ms'/><mstts:silence type='Tailing-exact' value='0ms'/>"
                 + (speakingRate == 1.0 ? xml(text)
                         : "<prosody rate='" + speakingRate + "'>" + xml(text) + "</prosody>")
                 + "</voice></speak>";
