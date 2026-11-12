@@ -87,6 +87,8 @@ class TtsServiceTest {
         assertThat(heads.get(0)).containsEntry("Ocp-Apim-Subscription-Key", "azure-key")
                 .containsEntry("Content-Type", "application/ssml+xml");
         assertThat(sent.get(0)).contains("ko-KR-SeoHyeonNeural").contains("심청이 &lt;안녕&gt; &amp; 반가워요");
+        assertThat(sent.get(0)).contains("<mstts:silence type='Leading-exact' value='0ms'/>")
+                .contains("xmlns:mstts='http://www.w3.org/2001/mstts'");
     }
 
     @Test
