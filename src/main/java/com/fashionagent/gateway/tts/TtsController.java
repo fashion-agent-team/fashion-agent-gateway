@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/tts")
 public class TtsController {
 
-    public record TtsRequest(String text, String voice) {
+    public record TtsRequest(String text, String voice, Double rate) {
     }
 
     private final TtsService tts;
@@ -24,7 +24,8 @@ public class TtsController {
     @PostMapping
     public ResponseEntity<byte[]> synthesize(@RequestBody TtsRequest body) {
         String voice = body == null ? null : body.voice();
-        TtsService.Audio audio = tts.synthesize(body == null ? null : body.text(), voice);
+        TtsService.Audio audio = tts.synthesize(body == null ? null : body.text(), voice,
+                body == null ? null : body.rate());
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(audio.mimeType()))
                 .header("Cache-Control", "private, max-age=86400")

@@ -164,6 +164,15 @@ public class TtsService {
     }
 
     public Audio synthesize(String text, String voice) {
+        return synthesize(text, voice, null);
+    }
+
+    /**
+     * @param rate 앱이 보낸 빠르기 배수(1.0 보통, 0.5~2.0). 2026-11-12: "천천히/빠르게 말해 줘"가 서버 목소리에도 먹게.
+     *        TTS_SPEAKING_RATE에 곱합니다. Gemini는 빠르기를 못 정해서 무시합니다.
+     */
+    public Audio synthesize(String text, String voice, Double rate) {
+        double r = Math.round(speakingRate * (rate == null ? 1.0 : Math.clamp(rate, 0.5, 2.0)) * 100) / 100.0;
         String t = text == null ? "" : text.strip();
         if (t.isEmpty()) {
             throw new ApiError(HttpStatus.BAD_REQUEST, "bad_request", "읽을 문장이 없어요.");
@@ -182,7 +191,7 @@ public class TtsService {
             case "azure" -> voice != null && AZURE_VOICES.containsKey(voice) ? voice : DEFAULT_AZURE_VOICE;
             default -> voice != null && VOICES.contains(voice) ? voice : DEFAULT_VOICE;
         };
-        String key = engine + "|" + v + "|" + t;
+        String key = engine + "|" + v + "|" + r + "|" + t;
         synchronized (cache) {
             Audio hit = cache.get(key);
             if (hit != null) {
@@ -193,14 +202,14 @@ public class TtsService {
         if ("azure".equals(engine) && edgeUrl != null && !azureBudget()) {
             // 이번 1분 동안 Azure를 많이 썼으면 엣지 선희로 읽습니다. 기억하지 않아서 나중엔 다시 유진으로 받습니다.
             log.info("TTS azure 1분 {}번 넘음, 엣지 선희로 읽어요", AZURE_PER_MINUTE);
-            return edge(t, DEFAULT_EDGE_VOICE);
+            return edge(t, DEFAULT_EDGE_VOICE, r);
         }
         Audio audio;
         try {
             audio = switch (engine) {
-                case "edge" -> edge(t, v);
-                case "azure" -> azure(t, v);
-                case "cloud" -> cloud(t, v);
+                case "edge" -> edge(t, v, r);
+                case "azure" -> azure(t, v, r);
+                case "cloud" -> cloud(t, v, r);
                 default -> gemini(t, v);
             };
         } catch (ApiError e) {
@@ -210,7 +219,7 @@ public class TtsService {
                 throw e;
             }
             log.warn("TTS azure 실패({}), 엣지 선희로 대신 읽어요", e.code());
-            return edge(t, DEFAULT_EDGE_VOICE);
+            return edge(t, DEFAULT_EDGE_VOICE, r);
         }
         log.info("TTS {} {} {}자 {}ms", engine, v, t.length(), (System.nanoTime() - started) / 1_000_000);
         synchronized (cache) {
@@ -219,7 +228,7 @@ public class TtsService {
         return audio;
     }
 
-    private Audio cloud(String text, String voice) {
+    private Audio cloud(String text, String voice, double speakingRate) {
         // 빠르기는 1.0이 아니면만 보냅니다(바꿀 때는 TTS_SPEAKING_RATE).
         Map<String, Object> audioConfig = speakingRate == 1.0 ? Map.of("audioEncoding", "MP3")
                 : Map.of("audioEncoding", "MP3", "speakingRate", speakingRate);
@@ -235,7 +244,7 @@ public class TtsService {
         return new Audio(Base64.getDecoder().decode(b64), "audio/mpeg");
     }
 
-    private Audio azure(String text, String voice) {
+    private Audio azure(String text, String voice, double speakingRate) {
         String ssml = "<speak version='1.0' xml:lang='ko-KR'><voice name='" + AZURE_VOICES.get(voice) + "'>"
                 + (speakingRate == 1.0 ? xml(text)
                         : "<prosody rate='" + speakingRate + "'>" + xml(text) + "</prosody>")
@@ -267,7 +276,7 @@ public class TtsService {
         }
     }
 
-    private Audio edge(String text, String voice) {
+    private Audio edge(String text, String voice, double speakingRate) {
         Map<String, Object> body = Map.of("text", text, "voice", EDGE_VOICES.get(voice), "rate", edgeRate(speakingRate));
         Reply reply = send(URI.create(edgeUrl + "/tts"), Map.of(), JSON.writeValueAsString(body));
         if (reply.body() == null || reply.body().length == 0) {

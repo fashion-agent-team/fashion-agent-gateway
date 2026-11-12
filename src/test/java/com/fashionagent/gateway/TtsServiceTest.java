@@ -186,4 +186,23 @@ class TtsServiceTest {
         assertThat(hosts.subList(0, 18)).allMatch(h -> h.contains("microsoft"));
         assertThat(hosts.subList(18, 20)).containsOnly("edge-tts");
     }
+
+    @Test
+    void 앱이_보낸_빠르기로_읽고_빠르기마다_따로_기억한다() {
+        TtsService.Sender sender = (uri, headers, body) -> {
+            sent.add(body);
+            return new TtsService.Reply(200, new byte[] { 1 });
+        };
+        var tts = new TtsService(null, null, "azure-key", null, "http://edge-tts:8099", 1.0, sender);
+
+        tts.synthesize("안녕", "YuJin", 1.2);
+        tts.synthesize("안녕", "YuJin", 1.2);
+        tts.synthesize("안녕", "YuJin", null);
+        tts.synthesize("안녕", "SunHi", 0.8);
+
+        assertThat(sent).hasSize(3);
+        assertThat(sent.get(0)).contains("<prosody rate='1.2'>");
+        assertThat(sent.get(1)).doesNotContain("prosody");
+        assertThat(sent.get(2)).contains("\"rate\":\"-20%\"");
+    }
 }
