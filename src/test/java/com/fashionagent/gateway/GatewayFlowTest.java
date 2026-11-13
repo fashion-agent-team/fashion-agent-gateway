@@ -42,12 +42,15 @@ class GatewayFlowTest {
     static int deadPort;
     /** agent가 받은 X-User-Id 헤더들(여러 개 오면 모두). */
     static final List<List<String>> seenUserIds = new CopyOnWriteArrayList<>();
+    /** agent가 받은 X-User-Profile 헤더들. */
+    static final List<List<String>> seenProfiles = new CopyOnWriteArrayList<>();
 
     @BeforeAll
     static void backend() throws IOException {
         agent = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         agent.createContext("/api/v1/agent/turn", ex -> {
             seenUserIds.add(ex.getRequestHeaders().getOrDefault("X-User-Id", List.of()));
+            seenProfiles.add(ex.getRequestHeaders().getOrDefault("X-User-Profile", List.of()));
             byte[] body = "{\"speech\":\"ok\",\"next\":\"listen\"}".getBytes(StandardCharsets.UTF_8);
             ex.getResponseHeaders().add("Content-Type", "application/json");
             ex.sendResponseHeaders(200, body.length);
@@ -143,6 +146,29 @@ class GatewayFlowTest {
         assertThat(call("PUT", "/api/v1/me/profile", token, "{\"heightCm\":400}").status()).isEqualTo(400);
 
         assertThat(devLogin(device).path("isNewUser").asBoolean()).isFalse();
+    }
+
+    @Test
+    void agent에는_옷_판단에_쓰는_내_정보만_붙이고_앱이_넣은_값은_지운다() throws Exception {
+        String token = devLogin("flow-" + UUID.randomUUID()).path("accessToken").asString();
+        seenProfiles.clear();
+        call("POST", "/api/v1/agent/turn", token, "{\"utterance\":\"x\"}", "X-User-Profile", "e30");
+        assertThat(seenProfiles.get(0)).isEmpty();
+
+        call("PUT", "/api/v1/me/profile", token,
+                "{\"name\":\"진행\",\"gender\":\"남자\",\"birthDate\":\"2001-05-01\",\"heightCm\":175.5,\"job\":\"대학생\",\"agentName\":\"심청이\"}");
+        seenProfiles.clear();
+        call("POST", "/api/v1/agent/turn", token, "{\"utterance\":\"x\"}");
+
+        List<String> got = seenProfiles.get(0);
+        assertThat(got).hasSize(1);
+        JsonNode wearer = json.readTree(new String(java.util.Base64.getUrlDecoder().decode(got.get(0)), StandardCharsets.UTF_8));
+        assertThat(wearer.path("gender").asString()).isEqualTo("남자");
+        assertThat(wearer.path("heightCm").asDouble()).isEqualTo(175.5);
+        assertThat(wearer.path("job").asString()).isEqualTo("대학생");
+        assertThat(wearer.has("ageGroup")).isTrue();
+        assertThat(wearer.has("name")).isFalse();
+        assertThat(wearer.has("birthDate")).isFalse();
     }
 
     @Test
