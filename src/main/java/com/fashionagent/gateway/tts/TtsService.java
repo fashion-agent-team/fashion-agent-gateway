@@ -66,6 +66,8 @@ public class TtsService {
             "Hyunsu", "ko-KR-HyunsuMultilingualNeural");
     public static final String DEFAULT_EDGE_VOICE = "SunHi";
     static final int MAX_CHARS = 500;
+    /** Azure 소리 형식. 16kHz 32kbps MP3(같은 문장 35.7KB → 23.9KB). */
+    static final String AZURE_FORMAT = "audio-16khz-32kbitrate-mono-mp3";
     static final int CACHE_SIZE = 300;
     /** Azure 무료 등급(F0)은 1분에 20번까지. 넘기 전에 엣지로 돌립니다(2026-11-12: 두세 번째 문장부터 폰 목소리). */
     static final int AZURE_PER_MINUTE = 18;
@@ -256,7 +258,8 @@ public class TtsService {
         Reply reply = send(URI.create("https://" + azureRegion + ".tts.speech.microsoft.com/cognitiveservices/v1"),
                 Map.of("Ocp-Apim-Subscription-Key", azureKey,
                         "Content-Type", "application/ssml+xml",
-                        "X-Microsoft-OutputFormat", "audio-24khz-48kbitrate-mono-mp3",
+                        // 2026-11-13: 48kbps → 16kHz 32kbps. 파일이 1/3 작아져 프록시·Funnel 길에서 덜 늦는다(안내 음성 음질은 충분).
+                        "X-Microsoft-OutputFormat", AZURE_FORMAT,
                         "User-Agent", "fashion-agent-gateway"),
                 ssml);
         if (reply.body() == null || reply.body().length == 0) {

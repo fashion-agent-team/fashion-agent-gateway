@@ -85,7 +85,8 @@ class TtsServiceTest {
         assertThat(audio.bytes()).containsExactly(7, 7);
         assertThat(hosts).containsExactly("koreacentral.tts.speech.microsoft.com");
         assertThat(heads.get(0)).containsEntry("Ocp-Apim-Subscription-Key", "azure-key")
-                .containsEntry("Content-Type", "application/ssml+xml");
+                .containsEntry("Content-Type", "application/ssml+xml")
+                .containsEntry("X-Microsoft-OutputFormat", "audio-16khz-32kbitrate-mono-mp3");
         assertThat(sent.get(0)).contains("ko-KR-SeoHyeonNeural").contains("심청이 &lt;안녕&gt; &amp; 반가워요");
         assertThat(sent.get(0)).contains("<mstts:silence type='Leading-exact' value='0ms'/>")
                 .contains("xmlns:mstts='http://www.w3.org/2001/mstts'");
