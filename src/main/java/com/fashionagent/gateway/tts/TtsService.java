@@ -245,6 +245,7 @@ public class TtsService {
     }
 
     private Audio azure(String text, String voice, double speakingRate) {
+        // 2026-11-13: 소리 파일을 줄여 프록시 길에서 빨리 오게 32kbps(16kHz)로 받습니다(48kbps보다 약 3분의 1 작음).
         // 앞뒤 무음을 없앱니다(2026-11-12: 조각을 이어 틀 때 무음이 두 번 들어가 문장 사이가 길었다). 문장 사이 쉼은 그대로.
         String ssml = "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis'"
                 + " xmlns:mstts='http://www.w3.org/2001/mstts' xml:lang='ko-KR'><voice name='"
@@ -256,7 +257,7 @@ public class TtsService {
         Reply reply = send(URI.create("https://" + azureRegion + ".tts.speech.microsoft.com/cognitiveservices/v1"),
                 Map.of("Ocp-Apim-Subscription-Key", azureKey,
                         "Content-Type", "application/ssml+xml",
-                        "X-Microsoft-OutputFormat", "audio-24khz-48kbitrate-mono-mp3",
+                        "X-Microsoft-OutputFormat", "audio-16khz-32kbitrate-mono-mp3",
                         "User-Agent", "fashion-agent-gateway"),
                 ssml);
         if (reply.body() == null || reply.body().length == 0) {
