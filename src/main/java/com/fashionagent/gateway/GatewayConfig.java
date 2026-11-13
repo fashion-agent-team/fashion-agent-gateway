@@ -1,6 +1,8 @@
 package com.fashionagent.gateway;
 
 import java.time.Clock;
+import java.time.LocalDate;
+import java.time.ZoneId;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -9,17 +11,20 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
 
+import com.fashionagent.gateway.account.AccountStore;
 import com.fashionagent.gateway.auth.FirebaseVerifier;
 import com.fashionagent.gateway.auth.JwtService;
 import com.fashionagent.gateway.stt.SttService;
 import com.fashionagent.gateway.tts.TtsService;
 import com.fashionagent.gateway.web.AuthFilter;
 import com.fashionagent.gateway.web.RateLimiter;
+import com.fashionagent.gateway.web.WearerHeader;
 
 @Configuration
 public class GatewayConfig {
 
     private static final Logger log = LoggerFactory.getLogger(GatewayConfig.class);
+    private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
 
     @Bean
     Clock clock() {
@@ -69,8 +74,10 @@ public class GatewayConfig {
 
     /** 게이트웨이 라우팅보다 먼저 돌아야 해서 가장 앞에 둡니다. */
     @Bean
-    FilterRegistrationBean<AuthFilter> authFilter(JwtService jwt, RateLimiter limiter, GatewayProperties props) {
-        var bean = new FilterRegistrationBean<>(new AuthFilter(jwt, limiter, props));
+    FilterRegistrationBean<AuthFilter> authFilter(JwtService jwt, RateLimiter limiter, GatewayProperties props,
+            AccountStore accounts, Clock clock) {
+        var bean = new FilterRegistrationBean<>(new AuthFilter(jwt, limiter, props,
+                userId -> WearerHeader.encode(accounts.profile(userId), LocalDate.now(clock.withZone(SEOUL)))));
         bean.setOrder(Ordered.HIGHEST_PRECEDENCE + 10);
         bean.addUrlPatterns("/*");
         return bean;

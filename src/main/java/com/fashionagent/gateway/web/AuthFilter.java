@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Function;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,6 +28,7 @@ import jakarta.servlet.http.HttpServletResponse;
  * <li>앱이 보낸 X-User-Id는 언제나 지웁니다(남의 id를 넣어 보내는 것 막기).</li>
  * <li>로그인·가족 답장 페이지·health 밖은 Bearer JWT가 있어야 하고, 확인한 사용자 id를 X-User-Id로 붙여 뒤로 넘깁니다.</li>
  * <li>사용자당 분당 횟수 제한(사진이 든 큰 요청은 따로 더 적게).</li>
+ * <li>agent로 가는 요청에는 옷 판단에 쓰는 내 정보만 X-User-Profile로 붙입니다(앱이 보낸 값은 지움, {@link WearerHeader}).</li>
  * <li>뒤쪽 서비스가 꺼졌거나 늦으면 약속 4절 모양으로 502 upstream_failed, 504 upstream_timeout.</li>
  * </ul>
  */
@@ -43,11 +45,18 @@ public class AuthFilter extends OncePerRequestFilter {
     private final JwtService jwt;
     private final RateLimiter limiter;
     private final GatewayProperties props;
+    /** 사용자 → X-User-Profile 값(없으면 null). null이면 붙이지 않습니다. */
+    private final Function<UUID, String> wearer;
 
     public AuthFilter(JwtService jwt, RateLimiter limiter, GatewayProperties props) {
+        this(jwt, limiter, props, null);
+    }
+
+    public AuthFilter(JwtService jwt, RateLimiter limiter, GatewayProperties props, Function<UUID, String> wearer) {
         this.jwt = jwt;
         this.limiter = limiter;
         this.props = props;
+        this.wearer = wearer;
     }
 
     static boolean isPublic(String path) {
@@ -85,8 +94,17 @@ public class AuthFilter extends OncePerRequestFilter {
             }
             request.setAttribute(USER_ID, userId);
         }
+        String profile = null;
+        if (userId != null && wearer != null && path.startsWith("/api/v1/agent/")) {
+            try {
+                profile = wearer.apply(userId);
+            } catch (RuntimeException e) {
+                // 내 정보를 못 읽어도 대화는 이어 갑니다(정보 없이 추천).
+                log.warn("X-User-Profile 못 만듦: {}", e.toString());
+            }
+        }
         try {
-            chain.doFilter(new UserIdRequest(request, userId), response);
+            chain.doFilter(new UserIdRequest(request, userId, profile), response);
         } catch (Exception e) {
             Throwable cause = rootCause(e);
             if (response.isCommitted()) {
@@ -124,24 +142,39 @@ public class AuthFilter extends OncePerRequestFilter {
         return t;
     }
 
-    /** X-User-Id를 지우고, 확인한 사용자가 있으면 그 값만 남긴 요청. */
+    /** 앱이 보낸 X-User-Id·X-User-Profile을 지우고, 게이트웨이가 확인한 값만 남긴 요청. */
     static class UserIdRequest extends HttpServletRequestWrapper {
         private final String userId;
+        private final String profile;
 
         UserIdRequest(HttpServletRequest request, UUID userId) {
+            this(request, userId, null);
+        }
+
+        UserIdRequest(HttpServletRequest request, UUID userId, String profile) {
             super(request);
             this.userId = userId == null ? null : userId.toString();
+            this.profile = profile;
+        }
+
+        private String own(String name) {
+            return HEADER.equalsIgnoreCase(name) ? userId : profile;
+        }
+
+        private static boolean ours(String name) {
+            return HEADER.equalsIgnoreCase(name) || WearerHeader.NAME.equalsIgnoreCase(name);
         }
 
         @Override
         public String getHeader(String name) {
-            return HEADER.equalsIgnoreCase(name) ? userId : super.getHeader(name);
+            return ours(name) ? own(name) : super.getHeader(name);
         }
 
         @Override
         public Enumeration<String> getHeaders(String name) {
-            if (HEADER.equalsIgnoreCase(name)) {
-                return userId == null ? Collections.emptyEnumeration() : Collections.enumeration(List.of(userId));
+            if (ours(name)) {
+                String v = own(name);
+                return v == null ? Collections.emptyEnumeration() : Collections.enumeration(List.of(v));
             }
             return super.getHeaders(name);
         }
@@ -151,12 +184,15 @@ public class AuthFilter extends OncePerRequestFilter {
             List<String> names = new ArrayList<>();
             for (Enumeration<String> e = super.getHeaderNames(); e.hasMoreElements();) {
                 String n = e.nextElement();
-                if (!HEADER.equalsIgnoreCase(n)) {
+                if (!ours(n)) {
                     names.add(n);
                 }
             }
             if (userId != null) {
                 names.add(HEADER);
+            }
+            if (profile != null) {
+                names.add(WearerHeader.NAME);
             }
             return Collections.enumeration(names);
         }
