@@ -57,6 +57,11 @@ class GatewayFlowTest {
             ex.getResponseBody().write(body);
             ex.close();
         });
+        agent.createContext("/api/v1/agent/warm", ex -> {
+            seenUserIds.add(ex.getRequestHeaders().getOrDefault("X-User-Id", List.of()));
+            ex.sendResponseHeaders(202, -1);
+            ex.close();
+        });
         agent.start();
         try (ServerSocket s = new ServerSocket(0)) {
             deadPort = s.getLocalPort(); // 닫힌 포트 = 꺼진 schedule
@@ -130,6 +135,16 @@ class GatewayFlowTest {
         assertThat(got).hasSize(1);
         assertThat(got.get(0)).isNotEqualTo("11111111-1111-1111-1111-111111111111");
         assertThat(UUID.fromString(got.get(0))).isNotNull();
+    }
+
+    @Test
+    void 미리_준비는_사용자_id를_붙여_agent로_넘기고_202를_그대로() throws Exception {
+        String token = devLogin("flow-" + UUID.randomUUID()).path("accessToken").asString();
+        seenUserIds.clear();
+        Res r = call("POST", "/api/v1/agent/warm", token, "{\"location\":{\"lat\":37.5,\"lon\":127.0}}");
+        assertThat(r.status()).isEqualTo(202);
+        assertThat(seenUserIds).hasSize(1);
+        assertThat(UUID.fromString(seenUserIds.get(0).get(0))).isNotNull();
     }
 
     @Test

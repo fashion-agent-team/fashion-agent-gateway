@@ -31,6 +31,7 @@
 - JWT는 여기서만 만들고 확인합니다(HS256, `JWT_SECRET`). 클레임: `sub`(사용자 UUID), `provider`, `iat`, `exp`.
 - 앱이 보낸 `X-User-Id`는 지우고, 확인한 사용자 id로 다시 붙여 뒤로 넘깁니다.
 - 사용량 제한: 사용자당 분당 30회, 사진이 든 요청(64KB 넘는 요청)은 분당 10회로 시작. 넘으면 429 `rate_limited`.
+  앱이 켜질 때 보내는 미리 준비(`POST /api/v1/agent/warm`)는 이 횟수와 따로 사용자당 분당 6회.
 - 리프레시 토큰은 한 번만 씁니다(DB에는 SHA-256만). 이미 쓴 토큰이 다시 오면 훔친 것으로 보고 그 사용자의 리프레시 토큰을 모두 끊습니다.
 - `FIREBASE_PROJECT_ID`가 없으면 `/auth/login`은 503 `not_configured`, dev가 아니면 `/auth/dev`는 404.
 - 뒤쪽 서비스가 꺼졌으면 502 `upstream_failed`, 30초 안에 답이 없으면 504 `upstream_timeout`.
