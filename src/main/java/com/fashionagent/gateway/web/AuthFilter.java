@@ -41,6 +41,9 @@ public class AuthFilter extends OncePerRequestFilter {
     static final long PHOTO_BYTES = 64 * 1024;
     /** 사용자당 분당 TTS 문장 수. 안내 한 번이 서너 문장이라 넉넉하게. */
     static final int TTS_PER_MINUTE = 120;
+    /** 앱이 켜지거나 다시 앞으로 올 때 보내는 미리 준비(agent가 날씨·일정을 불러 둠). 앱은 5분에 한 번쯤이라 적게, 말하기 횟수와 따로. */
+    static final String WARM_PATH = "/api/v1/agent/warm";
+    static final int WARM_PER_MINUTE = 6;
 
     private final JwtService jwt;
     private final RateLimiter limiter;
@@ -83,8 +86,11 @@ public class AuthFilter extends OncePerRequestFilter {
             }
             // 구글 목소리는 문장마다, 음성 인식은 말할 때마다 부르므로 말하기 횟수와 따로, 넉넉하게 셉니다.
             // 음성 인식은 소리가 커서 사진으로 세지 않게 여기서 나눕니다.
+            // 미리 준비도 말하기 횟수를 깎지 않게 따로 셉니다(2026-11-15).
             String voice = path.startsWith("/api/v1/tts") ? "tts:" : path.startsWith("/api/v1/stt") ? "stt:" : null;
-            if (voice != null ? !limiter.tryAcquire(voice + userId, TTS_PER_MINUTE)
+            boolean warm = path.equals(WARM_PATH);
+            if (warm ? !limiter.tryAcquire("warm:" + userId, WARM_PER_MINUTE)
+                    : voice != null ? !limiter.tryAcquire(voice + userId, TTS_PER_MINUTE)
                     : !limiter.tryAcquire("all:" + userId, props.requestsPerMinute())
                     || (request.getContentLengthLong() > PHOTO_BYTES
                             && !limiter.tryAcquire("photo:" + userId, props.photosPerMinute()))) {
