@@ -63,7 +63,7 @@ public class AuthFilter extends OncePerRequestFilter {
     }
 
     static boolean isPublic(String path) {
-        return path.startsWith("/api/v1/auth/") || path.startsWith("/h/") || path.equals("/actuator/health")
+        return path.startsWith("/api/v1/auth/") || path.equals("/actuator/health")
                 || path.startsWith("/actuator/health/");
     }
 

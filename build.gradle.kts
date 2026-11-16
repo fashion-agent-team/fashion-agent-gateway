@@ -20,7 +20,7 @@ repositories {
 extra["springCloudVersion"] = "2025.1.4"
 
 dependencies {
-    // 앱 요청을 agent·mcp-helper 등으로 넘김 (Spring Cloud Gateway Server Web MVC, 가상 스레드)
+    // 앱 요청을 agent·mcp-schedule 등으로 넘김 (Spring Cloud Gateway Server Web MVC, 가상 스레드)
     implementation("org.springframework.cloud:spring-cloud-starter-gateway-server-webmvc")
     implementation("org.springframework.boot:spring-boot-starter-webmvc")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
