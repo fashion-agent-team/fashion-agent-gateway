@@ -16,7 +16,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
-/** account 스키마(users, profiles, push_tokens, refresh_tokens). 표는 앱 레포 docs/infra/db/account/V1__init.sql 그대로. */
+/** account 스키마(users, user_identities, profiles, push_tokens, refresh_tokens). 표는 db/migration V1~V4. */
 @Repository
 public class AccountStore {
 
@@ -39,28 +39,29 @@ public class AccountStore {
 
     @Transactional
     public Account loginFirebase(String firebaseUid, String provider) {
-        Optional<UUID> found = jdbc.sql("UPDATE users SET last_login_at = now(), updated_at = now() WHERE firebase_uid = ? RETURNING id")
-                .param(firebaseUid).query(UUID.class).optional();
-        if (found.isPresent()) {
-            return new Account(found.get(), provider, !onboarded(found.get()));
-        }
-        UUID id = UUID.randomUUID();
-        jdbc.sql("INSERT INTO users (id, provider, firebase_uid, last_login_at) VALUES (?, ?, ?, now())")
-                .params(id, provider, firebaseUid).update();
-        return new Account(id, provider, true);
+        return login("firebase", firebaseUid, provider);
     }
 
     @Transactional
     public Account loginDev(String deviceId) {
-        Optional<UUID> found = jdbc.sql("UPDATE users SET last_login_at = now(), updated_at = now() WHERE dev_device_id = ? RETURNING id")
-                .param(deviceId).query(UUID.class).optional();
+        return login("dev", deviceId, "dev");
+    }
+
+    /** 로그인 수단(issuer, subject)으로 계정을 찾고, 없으면 계정과 수단을 함께 만듭니다(user_identities, V4). */
+    private Account login(String issuer, String subject, String provider) {
+        Optional<UUID> found = jdbc.sql("""
+                UPDATE user_identities SET sign_in_provider = ?, updated_at = now()
+                WHERE issuer = ? AND subject = ? RETURNING user_id""")
+                .params(provider, issuer, subject).query(UUID.class).optional();
         if (found.isPresent()) {
-            return new Account(found.get(), "dev", !onboarded(found.get()));
+            jdbc.sql("UPDATE users SET last_login_at = now(), updated_at = now() WHERE id = ?").param(found.get()).update();
+            return new Account(found.get(), provider, !onboarded(found.get()));
         }
         UUID id = UUID.randomUUID();
-        jdbc.sql("INSERT INTO users (id, provider, dev_device_id, last_login_at) VALUES (?, 'dev', ?, now())")
-                .params(id, deviceId).update();
-        return new Account(id, "dev", true);
+        jdbc.sql("INSERT INTO users (id, last_login_at) VALUES (?, now())").param(id).update();
+        jdbc.sql("INSERT INTO user_identities (user_id, issuer, subject, sign_in_provider) VALUES (?, ?, ?, ?)")
+                .params(id, issuer, subject, provider).update();
+        return new Account(id, provider, true);
     }
 
     private boolean onboarded(UUID userId) {
@@ -81,9 +82,12 @@ public class AccountStore {
     public Optional<Account> useRefresh(String token) {
         String hash = sha256(token);
         var row = jdbc.sql("""
-                SELECT r.user_id, u.provider, r.expires_at, r.revoked_at
-                FROM refresh_tokens r JOIN users u ON u.id = r.user_id
-                WHERE r.token_hash = ? FOR UPDATE OF r""")
+                SELECT r.user_id,
+                       (SELECT i.sign_in_provider FROM user_identities i WHERE i.user_id = r.user_id
+                         ORDER BY i.updated_at DESC, i.id DESC LIMIT 1),
+                       r.expires_at, r.revoked_at
+                FROM refresh_tokens r
+                WHERE r.token_hash = ? FOR UPDATE""")
                 .param(hash)
                 .query((rs, i) -> new Object[] { rs.getObject(1, UUID.class), rs.getString(2), rs.getTimestamp(3),
                         rs.getTimestamp(4) })
