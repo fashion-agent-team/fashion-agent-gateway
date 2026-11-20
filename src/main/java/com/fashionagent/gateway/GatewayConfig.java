@@ -18,7 +18,7 @@ import com.fashionagent.gateway.stt.SttService;
 import com.fashionagent.gateway.tts.TtsService;
 import com.fashionagent.gateway.web.AuthFilter;
 import com.fashionagent.gateway.web.RateLimiter;
-import com.fashionagent.gateway.web.WearerHeader;
+import com.fashionagent.gateway.web.WearerBody;
 
 @Configuration
 public class GatewayConfig {
@@ -77,7 +77,7 @@ public class GatewayConfig {
     FilterRegistrationBean<AuthFilter> authFilter(JwtService jwt, RateLimiter limiter, GatewayProperties props,
             AccountStore accounts, Clock clock) {
         var bean = new FilterRegistrationBean<>(new AuthFilter(jwt, limiter, props,
-                userId -> WearerHeader.encode(accounts.profile(userId), LocalDate.now(clock.withZone(SEOUL)))));
+                userId -> WearerBody.of(accounts.profile(userId), LocalDate.now(clock.withZone(SEOUL)))));
         bean.setOrder(Ordered.HIGHEST_PRECEDENCE + 10);
         bean.addUrlPatterns("/*");
         return bean;

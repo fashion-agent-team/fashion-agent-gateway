@@ -1,6 +1,7 @@
 package com.fashionagent.gateway.web;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Enumeration;
@@ -17,7 +18,9 @@ import com.fashionagent.gateway.GatewayProperties;
 import com.fashionagent.gateway.auth.JwtService;
 
 import jakarta.servlet.FilterChain;
+import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
@@ -28,7 +31,7 @@ import jakarta.servlet.http.HttpServletResponse;
  * <li>앱이 보낸 X-User-Id는 언제나 지웁니다(남의 id를 넣어 보내는 것 막기).</li>
  * <li>로그인·가족 답장 페이지·health 밖은 Bearer JWT가 있어야 하고, 확인한 사용자 id를 X-User-Id로 붙여 뒤로 넘깁니다.</li>
  * <li>사용자당 분당 횟수 제한(사진이 든 큰 요청은 따로 더 적게).</li>
- * <li>agent로 가는 요청에는 옷 판단에 쓰는 내 정보만 X-User-Profile로 붙입니다(앱이 보낸 값은 지움, {@link WearerHeader}).</li>
+ * <li>agent에 보내는 말(POST /api/v1/agent/turn)의 바디에는 옷 판단에 쓰는 내 정보만 "wearer"로 넣습니다(앱이 보낸 값은 덮어씀, {@link WearerBody}).</li>
  * <li>뒤쪽 서비스가 꺼졌거나 늦으면 약속 4절 모양으로 502 upstream_failed, 504 upstream_timeout.</li>
  * </ul>
  */
@@ -48,14 +51,15 @@ public class AuthFilter extends OncePerRequestFilter {
     private final JwtService jwt;
     private final RateLimiter limiter;
     private final GatewayProperties props;
-    /** 사용자 → X-User-Profile 값(없으면 null). null이면 붙이지 않습니다. */
-    private final Function<UUID, String> wearer;
+    /** 사용자 → 바디에 넣을 내 정보(없으면 null). 이 함수가 null이면 바디를 고치지 않습니다(테스트용). */
+    private final Function<UUID, WearerBody.Wearer> wearer;
 
     public AuthFilter(JwtService jwt, RateLimiter limiter, GatewayProperties props) {
         this(jwt, limiter, props, null);
     }
 
-    public AuthFilter(JwtService jwt, RateLimiter limiter, GatewayProperties props, Function<UUID, String> wearer) {
+    public AuthFilter(JwtService jwt, RateLimiter limiter, GatewayProperties props,
+            Function<UUID, WearerBody.Wearer> wearer) {
         this.jwt = jwt;
         this.limiter = limiter;
         this.props = props;
@@ -100,17 +104,19 @@ public class AuthFilter extends OncePerRequestFilter {
             }
             request.setAttribute(USER_ID, userId);
         }
-        String profile = null;
-        if (userId != null && wearer != null && path.startsWith("/api/v1/agent/")) {
+        boolean addWearer = userId != null && wearer != null && "POST".equals(request.getMethod())
+                && path.equals(WearerBody.TURN_PATH);
+        WearerBody.Wearer profile = null;
+        if (addWearer) {
             try {
                 profile = wearer.apply(userId);
             } catch (RuntimeException e) {
-                // 내 정보를 못 읽어도 대화는 이어 갑니다(정보 없이 추천).
-                log.warn("X-User-Profile 못 만듦: {}", e.toString());
+                // 내 정보를 못 읽어도 대화는 이어 갑니다(정보 없이 추천, "wearer":null).
+                log.warn("wearer 못 만듦: {}", e.toString());
             }
         }
         try {
-            chain.doFilter(new UserIdRequest(request, userId, profile), response);
+            chain.doFilter(new UserIdRequest(request, userId, addWearer, profile), response);
         } catch (Exception e) {
             Throwable cause = rootCause(e);
             if (response.isCommitted()) {
@@ -148,41 +154,46 @@ public class AuthFilter extends OncePerRequestFilter {
         return t;
     }
 
-    /** 앱이 보낸 X-User-Id·X-User-Profile을 지우고, 게이트웨이가 확인한 값만 남긴 요청. */
+    /**
+     * 앱이 보낸 X-User-Id를 지우고 게이트웨이가 확인한 값만 남긴 요청.
+     * agent에 보내는 말이면 바디 끝에 "wearer"를 덧붙입니다. 길이가 바뀌므로 Content-Length는 빼고 나눠 보냅니다(chunked).
+     */
     static class UserIdRequest extends HttpServletRequestWrapper {
+        private static final String LENGTH = "Content-Length";
         private final String userId;
-        private final String profile;
+        private final boolean addWearer;
+        private final WearerBody.Wearer wearer;
+        private ServletInputStream body;
 
         UserIdRequest(HttpServletRequest request, UUID userId) {
-            this(request, userId, null);
+            this(request, userId, false, null);
         }
 
-        UserIdRequest(HttpServletRequest request, UUID userId, String profile) {
+        UserIdRequest(HttpServletRequest request, UUID userId, boolean addWearer, WearerBody.Wearer wearer) {
             super(request);
             this.userId = userId == null ? null : userId.toString();
-            this.profile = profile;
+            this.addWearer = addWearer;
+            this.wearer = wearer;
         }
 
-        private String own(String name) {
-            return HEADER.equalsIgnoreCase(name) ? userId : profile;
-        }
-
-        private static boolean ours(String name) {
-            return HEADER.equalsIgnoreCase(name) || WearerHeader.NAME.equalsIgnoreCase(name);
+        private boolean hidden(String name) {
+            return addWearer && LENGTH.equalsIgnoreCase(name);
         }
 
         @Override
         public String getHeader(String name) {
-            return ours(name) ? own(name) : super.getHeader(name);
+            if (HEADER.equalsIgnoreCase(name)) {
+                return userId;
+            }
+            return hidden(name) ? null : super.getHeader(name);
         }
 
         @Override
         public Enumeration<String> getHeaders(String name) {
-            if (ours(name)) {
-                String v = own(name);
-                return v == null ? Collections.emptyEnumeration() : Collections.enumeration(List.of(v));
+            if (HEADER.equalsIgnoreCase(name)) {
+                return userId == null ? Collections.emptyEnumeration() : Collections.enumeration(List.of(userId));
             }
-            return super.getHeaders(name);
+            return hidden(name) ? Collections.emptyEnumeration() : super.getHeaders(name);
         }
 
         @Override
@@ -190,17 +201,77 @@ public class AuthFilter extends OncePerRequestFilter {
             List<String> names = new ArrayList<>();
             for (Enumeration<String> e = super.getHeaderNames(); e.hasMoreElements();) {
                 String n = e.nextElement();
-                if (!ours(n)) {
+                if (!HEADER.equalsIgnoreCase(n) && !hidden(n)) {
                     names.add(n);
                 }
             }
             if (userId != null) {
                 names.add(HEADER);
             }
-            if (profile != null) {
-                names.add(WearerHeader.NAME);
-            }
             return Collections.enumeration(names);
+        }
+
+        @Override
+        public int getContentLength() {
+            return addWearer ? -1 : super.getContentLength();
+        }
+
+        @Override
+        public long getContentLengthLong() {
+            return addWearer ? -1 : super.getContentLengthLong();
+        }
+
+        @Override
+        public ServletInputStream getInputStream() throws IOException {
+            if (!addWearer) {
+                return super.getInputStream();
+            }
+            if (body == null) {
+                ServletInputStream raw = super.getInputStream();
+                InputStream added = WearerBody.append(raw, wearer);
+                body = new ServletInputStream() {
+                    private boolean finished;
+
+                    @Override
+                    public int read() throws IOException {
+                        int b = added.read();
+                        finished = b < 0;
+                        return b;
+                    }
+
+                    @Override
+                    public int read(byte[] buf, int off, int len) throws IOException {
+                        int n = added.read(buf, off, len);
+                        finished = n < 0;
+                        return n;
+                    }
+
+                    @Override
+                    public boolean isFinished() {
+                        return finished;
+                    }
+
+                    @Override
+                    public boolean isReady() {
+                        return true;
+                    }
+
+                    @Override
+                    public void setReadListener(ReadListener listener) {
+                        raw.setReadListener(listener);
+                    }
+                };
+            }
+            return body;
+        }
+
+        @Override
+        public java.io.BufferedReader getReader() throws IOException {
+            if (!addWearer) {
+                return super.getReader();
+            }
+            return new java.io.BufferedReader(new java.io.InputStreamReader(getInputStream(),
+                    java.nio.charset.StandardCharsets.UTF_8));
         }
     }
 }

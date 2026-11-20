@@ -16,6 +16,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import com.fashionagent.gateway.auth.JwtService;
 import com.fashionagent.gateway.web.AuthFilter;
 import com.fashionagent.gateway.web.RateLimiter;
+import com.fashionagent.gateway.web.WearerBody;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -25,7 +26,7 @@ class AuthFilterWarmTest {
     final GatewayProperties props = new GatewayProperties("0123456789abcdef0123456789abcdef", Duration.ofHours(1),
             Duration.ofDays(30), false, null, 30, 10);
     final JwtService jwt = new JwtService(props, Clock.systemUTC());
-    final AuthFilter filter = new AuthFilter(jwt, new RateLimiter(Clock.systemUTC()), props, id -> "cHJvZmlsZQ");
+    final AuthFilter filter = new AuthFilter(jwt, new RateLimiter(Clock.systemUTC()), props, id -> new WearerBody.Wearer("여자", null, null, null, null));
     final UUID user = UUID.randomUUID();
     final String token = jwt.issue(user, "dev");
     final List<HttpServletRequest> passed = new ArrayList<>();
@@ -53,11 +54,34 @@ class AuthFilterWarmTest {
     }
 
     @Test
-    void 확인한_사용자_id와_내_정보를_붙여_넘긴다() throws Exception {
+    void 확인한_사용자_id를_붙여_넘기고_미리_준비_바디는_고치지_않는다() throws Exception {
         assertThat(send("/api/v1/agent/warm", token).getStatus()).isEqualTo(200);
         assertThat(passed).hasSize(1);
         assertThat(passed.get(0).getHeader("X-User-Id")).isEqualTo(user.toString());
-        assertThat(passed.get(0).getHeader("X-User-Profile")).isEqualTo("cHJvZmlsZQ");
+        assertThat(passed.get(0).getContentLengthLong()).isEqualTo(-1); // MockHttpServletRequest 기본(바디 없음)
+        assertThat(passed.get(0).getInputStream().readAllBytes()).isEmpty();
+    }
+
+    @Test
+    void 말을_보내면_바디_끝에_wearer를_붙이고_Content_Length는_뺀다() throws Exception {
+        MockHttpServletRequest req = new MockHttpServletRequest("POST", "/api/v1/agent/turn");
+        req.addHeader("Authorization", "Bearer " + token);
+        req.setContentType("application/json");
+        req.setContent("{\"utterance\":\"x\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        req.addHeader("Content-Length", "16");
+        filter.doFilter(req, new MockHttpServletResponse(), new MockFilterChain() {
+            @Override
+            public void doFilter(jakarta.servlet.ServletRequest r, jakarta.servlet.ServletResponse s) {
+                passed.add((HttpServletRequest) r);
+            }
+        });
+
+        HttpServletRequest out = passed.get(0);
+        assertThat(new String(out.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8))
+                .isEqualTo("{\"utterance\":\"x\",\"wearer\":{\"gender\":\"여자\"}}");
+        assertThat(out.getContentLengthLong()).isEqualTo(-1);
+        assertThat(out.getHeader("Content-Length")).isNull();
+        assertThat(java.util.Collections.list(out.getHeaderNames())).doesNotContain("Content-Length");
     }
 
     @Test

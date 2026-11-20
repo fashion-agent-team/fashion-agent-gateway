@@ -38,6 +38,7 @@ import com.fashionagent.gateway.account.AccountStore.Profile;
 import com.fashionagent.gateway.web.AuthController.DevRequest;
 import com.fashionagent.gateway.web.AuthController.RefreshRequest;
 import com.fashionagent.gateway.web.AuthController.Tokens;
+import com.fashionagent.gateway.web.WearerBody;
 import com.sun.net.httpserver.HttpServer;
 
 import tools.jackson.databind.JsonNode;
@@ -58,6 +59,10 @@ class GatewayIntegrationTest {
     record Utterance(String utterance) {
     }
 
+    /** 앱이 몰래 wearer를 넣어 보내는 경우. */
+    record SpoofedUtterance(String utterance, WearerBody.Wearer wearer) {
+    }
+
     record Location(double lat, double lon) {
     }
 
@@ -71,15 +76,15 @@ class GatewayIntegrationTest {
     static int deadPort;
     /** agent가 받은 X-User-Id 헤더들(여러 개 오면 모두). */
     static final List<List<String>> seenUserIds = new CopyOnWriteArrayList<>();
-    /** agent가 받은 X-User-Profile 헤더들. */
-    static final List<List<String>> seenProfiles = new CopyOnWriteArrayList<>();
+    /** agent가 받은 말 바디들. */
+    static final List<String> seenBodies = new CopyOnWriteArrayList<>();
 
     @BeforeAll
     static void backend() throws IOException {
         agent = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         agent.createContext("/api/v1/agent/turn", ex -> {
             seenUserIds.add(ex.getRequestHeaders().getOrDefault("X-User-Id", List.of()));
-            seenProfiles.add(ex.getRequestHeaders().getOrDefault("X-User-Profile", List.of()));
+            seenBodies.add(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             byte[] body = "{\"speech\":\"ok\",\"next\":\"listen\"}".getBytes(StandardCharsets.UTF_8);
             ex.getResponseHeaders().add("Content-Type", "application/json");
             ex.sendResponseHeaders(200, body.length);
@@ -317,31 +322,55 @@ class GatewayIntegrationTest {
     }
 
     @Test
-    @DisplayName("Given 옷 판단용 내 정보가 저장된 사용자 When agent를 부르면 Then 성별·나이대·키·직업만 붙이고 앱이 넣은 값은 지운다")
-    void agent에는_옷_판단에_쓰는_내_정보만_붙인다() throws Exception {
+    @DisplayName("Given 옷 판단용 내 정보가 저장된 사용자 When agent에 말을 보내면 Then 바디의 wearer에 성별·나이대·키·직업만 넣고 앱이 넣은 값은 덮어쓴다")
+    void agent에는_옷_판단에_쓰는_내_정보만_바디로_넘긴다() throws Exception {
         // given
         String token = devLogin(newDevice()).accessToken();
-        seenProfiles.clear();
-        call("POST", "/api/v1/agent/turn", token, new Utterance("x"), "X-User-Profile", "e30");
-        List<String> beforeProfile = seenProfiles.get(0);
+        seenBodies.clear();
+        Res before = call("POST", "/api/v1/agent/turn", token,
+                new SpoofedUtterance("x", new WearerBody.Wearer(null, null, null, null, "가짜")));
+        JsonNode beforeBody = json.readTree(seenBodies.get(0));
         call("PUT", "/api/v1/me/profile", token, new Profile("진행", LocalDate.of(2001, 5, 1), "남자", "대학생",
                 new BigDecimal("175.5"), null, "심청이", null, null));
-        seenProfiles.clear();
+        seenBodies.clear();
 
         // when
-        call("POST", "/api/v1/agent/turn", token, new Utterance("x"));
+        Res after = call("POST", "/api/v1/agent/turn", token,
+                new SpoofedUtterance("오늘 뭐 입지", new WearerBody.Wearer(null, null, null, null, "가짜")));
 
-        // then
-        assertThat(beforeProfile).isEmpty();
-        List<String> got = seenProfiles.get(0);
-        assertThat(got).hasSize(1);
-        JsonNode wearer = json.readTree(new String(Base64.getUrlDecoder().decode(got.get(0)), StandardCharsets.UTF_8));
+        // then: 저장된 정보가 없을 땐 null로 지우고, 있으면 DB 값으로 덮어쓴다
+        assertThat(before.status()).isEqualTo(200);
+        assertThat(beforeBody.path("wearer").isNull()).isTrue();
+        assertThat(after.status()).isEqualTo(200);
+        JsonNode body = json.readTree(seenBodies.get(0));
+        assertThat(body.path("utterance").asString()).isEqualTo("오늘 뭐 입지");
+        JsonNode wearer = body.path("wearer");
         assertThat(wearer.path("gender").asString()).isEqualTo("남자");
         assertThat(wearer.path("heightCm").asDouble()).isEqualTo(175.5);
         assertThat(wearer.path("job").asString()).isEqualTo("대학생");
         assertThat(wearer.has("ageGroup")).isTrue();
         assertThat(wearer.has("name")).isFalse();
         assertThat(wearer.has("birthDate")).isFalse();
+    }
+
+    @Test
+    @DisplayName("Given 큰 사진이 든 말 When agent에 보내면 Then 사진은 그대로 넘어가고 wearer도 붙는다")
+    void 큰_사진도_그대로_넘기고_wearer를_붙인다() throws Exception {
+        // given
+        String token = devLogin(newDevice()).accessToken();
+        record Photo(String image, String imageKind) {
+        }
+        String image = "A".repeat(2_000_000);
+        seenBodies.clear();
+
+        // when
+        Res r = call("POST", "/api/v1/agent/turn", token, new Photo(image, "outfit"));
+
+        // then
+        assertThat(r.status()).isEqualTo(200);
+        JsonNode body = json.readTree(seenBodies.get(0));
+        assertThat(body.path("image").asString()).isEqualTo(image);
+        assertThat(body.has("wearer")).isTrue();
     }
 
     @Test
