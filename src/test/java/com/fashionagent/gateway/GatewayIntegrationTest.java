@@ -11,7 +11,12 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.sql.Timestamp;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
@@ -22,10 +27,12 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 import com.fashionagent.gateway.account.AccountStore.Profile;
 import com.fashionagent.gateway.web.AuthController.DevRequest;
@@ -107,6 +114,8 @@ class GatewayIntegrationTest {
 
     @LocalServerPort
     int port;
+    @Autowired
+    JdbcClient db;
     final HttpClient http = HttpClient.newHttpClient();
     final JsonMapper json = JsonMapper.builder().build();
 
@@ -243,6 +252,68 @@ class GatewayIntegrationTest {
         // then
         assertThat(iphone.status()).isEqualTo(204);
         assertThat(galaxy.status()).isEqualTo(204);
+    }
+
+    @Test
+    @DisplayName("US3-2 Given 가족이 같은 폰에서 다른 계정으로 로그인 When 그 폰을 다시 등록하면 Then 그 폰의 알림 주인이 새 계정으로 바뀌고 한 줄만 남는다")
+    void 같은_폰을_다른_계정이_등록하면_주인이_바뀐다() throws Exception {
+        // given
+        String phone = "token-" + UUID.randomUUID();
+        String mom = devLogin(newDevice()).accessToken();
+        String son = devLogin(newDevice()).accessToken();
+        call("PUT", "/api/v1/me/push-token", mom, new PushToken(phone, "ios"));
+        UUID before = ownerOf(phone);
+
+        // when
+        Res r = call("PUT", "/api/v1/me/push-token", son, new PushToken(phone, "ios"));
+
+        // then
+        assertThat(r.status()).isEqualTo(204);
+        assertThat(ownerOf(phone)).isNotEqualTo(before);
+        assertThat(db.sql("SELECT count(*) FROM push_tokens WHERE token = ?").param(phone).query(Long.class).single())
+                .isEqualTo(1);
+    }
+
+    UUID ownerOf(String pushToken) {
+        return db.sql("SELECT user_id FROM push_tokens WHERE token = ?").param(pushToken).query(UUID.class).single();
+    }
+
+    static String sha256(String s) throws Exception {
+        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(s.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    @Test
+    @DisplayName("FR-008·FR-009 Given 처음 로그인 When 토큰을 받으면 Then 출입증은 1시간, 갱신 토큰은 30일이고 DB에는 원문 대신 대조용 값만 남는다")
+    void 출입증은_1시간_갱신_토큰은_30일이고_원문은_저장하지_않는다() throws Exception {
+        // given
+        Instant now = Instant.now();
+
+        // when
+        Tokens t = devLogin(newDevice());
+
+        // then
+        assertThat(t.expiresIn()).isEqualTo(3600);
+        assertThat(db.sql("SELECT count(*) FROM refresh_tokens WHERE token_hash = ?").param(t.refreshToken())
+                .query(Long.class).single()).isZero();
+        Timestamp expires = db.sql("SELECT expires_at FROM refresh_tokens WHERE token_hash = ?")
+                .param(sha256(t.refreshToken())).query(Timestamp.class).single();
+        assertThat(Duration.between(now, expires.toInstant())).isBetween(Duration.ofDays(30).minusMinutes(5),
+                Duration.ofDays(30).plusMinutes(5));
+    }
+
+    @Test
+    @DisplayName("005 US1-2 Given Flyway가 account 스키마를 만듦 When 외래 키를 보면 Then 다른 스키마를 가리키는 FK는 0개")
+    void account_스키마는_다른_스키마로_FK가_없다() {
+        // when
+        long crossSchema = db.sql("""
+                SELECT count(*) FROM pg_constraint c
+                JOIN pg_namespace n ON n.oid = c.connamespace
+                JOIN pg_class ref ON ref.oid = c.confrelid
+                WHERE c.contype = 'f' AND n.nspname = 'account' AND ref.relnamespace <> c.connamespace""")
+                .query(Long.class).single();
+
+        // then
+        assertThat(crossSchema).isZero();
     }
 
     @Test
