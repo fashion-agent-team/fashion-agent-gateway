@@ -15,18 +15,6 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_DB: fashion
-          POSTGRES_PASSWORD: postgres
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -49,11 +37,7 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew test --no-daemon
-        env:
-          # GatewayFlowTest는 실제 PostgreSQL이 있을 때만 돕니다.
-          GATEWAY_TEST_DB_URL: jdbc:postgresql://localhost:5432/fashion
-          GATEWAY_TEST_DB_USER: postgres
-          GATEWAY_TEST_DB_PASSWORD: postgres
+        # GatewayIntegrationTest는 Testcontainers로 postgres:17을 직접 띄웁니다(러너에 Docker가 있음).
       - name: 실패한 테스트 보고서 올리기
         if: failure() && steps.code.outputs.has == 'true'
         uses: actions/upload-artifact@v4
