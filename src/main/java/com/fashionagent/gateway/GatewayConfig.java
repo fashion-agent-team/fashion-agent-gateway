@@ -6,6 +6,7 @@ import java.time.ZoneId;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -75,9 +76,12 @@ public class GatewayConfig {
     /** 게이트웨이 라우팅보다 먼저 돌아야 해서 가장 앞에 둡니다. */
     @Bean
     FilterRegistrationBean<AuthFilter> authFilter(JwtService jwt, RateLimiter limiter, GatewayProperties props,
-            AccountStore accounts, Clock clock) {
+            AccountStore accounts, Clock clock,
+            @Value("${gateway.auth-per-minute:" + AuthFilter.AUTH_PER_MINUTE + "}") int authPerMinute,
+            @Value("${gateway.signups-per-minute:" + AuthFilter.SIGNUPS_PER_MINUTE + "}") int signupsPerMinute) {
         var bean = new FilterRegistrationBean<>(new AuthFilter(jwt, limiter, props,
-                userId -> WearerBody.of(accounts.profile(userId), LocalDate.now(clock.withZone(SEOUL)))));
+                userId -> WearerBody.of(accounts.profile(userId), LocalDate.now(clock.withZone(SEOUL))),
+                authPerMinute, signupsPerMinute));
         bean.setOrder(Ordered.HIGHEST_PRECEDENCE + 10);
         bean.addUrlPatterns("/*");
         return bean;

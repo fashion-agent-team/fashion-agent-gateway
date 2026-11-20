@@ -113,6 +113,9 @@ class GatewayIntegrationTest {
     static void props(DynamicPropertyRegistry r) {
         TestDatabase.register(r);
         r.add("gateway.dev-login", () -> "true");
+        // 테스트마다 dev 로그인을 여러 번 하므로 로그인 횟수 제한은 넉넉하게(제한은 AuthFilterLoginLimitTest에서 봄).
+        r.add("gateway.auth-per-minute", () -> "1000");
+        r.add("gateway.signups-per-minute", () -> "1000");
         r.add("AGENT_URL", () -> "http://127.0.0.1:" + agent.getAddress().getPort());
         r.add("SCHEDULE_URL", () -> "http://127.0.0.1:" + deadPort);
     }
