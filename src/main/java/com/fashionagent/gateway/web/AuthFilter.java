@@ -31,6 +31,8 @@ import jakarta.servlet.http.HttpServletResponse;
  * <li>앱이 보낸 X-User-Id는 언제나 지웁니다(남의 id를 넣어 보내는 것 막기).</li>
  * <li>로그인·가족 답장 페이지·health 밖은 Bearer JWT가 있어야 하고, 확인한 사용자 id를 X-User-Id로 붙여 뒤로 넘깁니다.</li>
  * <li>사용자당 분당 횟수 제한(사진이 든 큰 요청은 따로 더 적게).</li>
+ * <li>로그인 없이 부르는 /api/v1/auth/*는 기기(IP)당 분당 {@link #AUTH_PER_MINUTE}번, 계정을 만들 수 있는 /dev·/login은
+ * 모두 합쳐 분당 {@link #SIGNUPS_PER_MINUTE}번(누가 계정을 끝없이 만들어 GPT·TTS를 쓰는 것 막기, 2026-11-20 점검).</li>
  * <li>agent에 보내는 말(POST /api/v1/agent/turn)의 바디에는 옷 판단에 쓰는 내 정보만 "wearer"로 넣습니다(앱이 보낸 값은 덮어씀, {@link WearerBody}).</li>
  * <li>뒤쪽 서비스가 꺼졌거나 늦으면 약속 4절 모양으로 502 upstream_failed, 504 upstream_timeout.</li>
  * </ul>
@@ -47,12 +49,19 @@ public class AuthFilter extends OncePerRequestFilter {
     /** 앱이 켜지거나 다시 앞으로 올 때 보내는 미리 준비(agent가 날씨·일정을 불러 둠). 앱은 5분에 한 번쯤이라 적게, 말하기 횟수와 따로. */
     static final String WARM_PATH = "/api/v1/agent/warm";
     static final int WARM_PER_MINUTE = 6;
+    /** 기본값. application.yml gateway.auth-per-minute로 바꿈. 한 사람이 로그인·갱신을 1분에 10번 넘게 할 일은 없습니다. */
+    public static final int AUTH_PER_MINUTE = 10;
+    /** 기본값. application.yml gateway.signups-per-minute로 바꿈. IP를 바꿔 가며 보내도 전체로 막습니다. */
+    public static final int SIGNUPS_PER_MINUTE = 30;
+    static final String SIGNUP_KEY = "signup:all";
 
     private final JwtService jwt;
     private final RateLimiter limiter;
     private final GatewayProperties props;
     /** 사용자 → 바디에 넣을 내 정보(없으면 null). 이 함수가 null이면 바디를 고치지 않습니다(테스트용). */
     private final Function<UUID, WearerBody.Wearer> wearer;
+    private final int authPerMinute;
+    private final int signupsPerMinute;
 
     public AuthFilter(JwtService jwt, RateLimiter limiter, GatewayProperties props) {
         this(jwt, limiter, props, null);
@@ -60,10 +69,34 @@ public class AuthFilter extends OncePerRequestFilter {
 
     public AuthFilter(JwtService jwt, RateLimiter limiter, GatewayProperties props,
             Function<UUID, WearerBody.Wearer> wearer) {
+        this(jwt, limiter, props, wearer, AUTH_PER_MINUTE, SIGNUPS_PER_MINUTE);
+    }
+
+    public AuthFilter(JwtService jwt, RateLimiter limiter, GatewayProperties props,
+            Function<UUID, WearerBody.Wearer> wearer, int authPerMinute, int signupsPerMinute) {
         this.jwt = jwt;
         this.limiter = limiter;
         this.props = props;
         this.wearer = wearer;
+        this.authPerMinute = authPerMinute;
+        this.signupsPerMinute = signupsPerMinute;
+    }
+
+    /** 앱 → 강사님 프록시 → Funnel → nginx를 거쳐 오므로 X-Forwarded-For 맨 앞이 앱 쪽 주소. 없으면 바로 붙은 주소. */
+    static String clientIp(HttpServletRequest request) {
+        String forwarded = request.getHeader("X-Forwarded-For");
+        if (forwarded != null) {
+            String first = forwarded.split(",", 2)[0].strip();
+            if (!first.isEmpty()) {
+                return first;
+            }
+        }
+        return request.getRemoteAddr();
+    }
+
+    /** 계정을 새로 만들 수 있는 로그인(dev 로그인, 구글/Firebase 로그인). */
+    static boolean isSignup(String path) {
+        return path.equals("/api/v1/auth/dev") || path.equals("/api/v1/auth/login");
     }
 
     static boolean isPublic(String path) {
@@ -76,6 +109,13 @@ public class AuthFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         String path = request.getRequestURI();
         UUID userId = null;
+        if (path.startsWith("/api/v1/auth/")
+                && (!limiter.tryAcquire("auth:" + clientIp(request), authPerMinute)
+                        || (isSignup(path) && !limiter.tryAcquire(SIGNUP_KEY, signupsPerMinute)))) {
+            response.setHeader("Retry-After", "60");
+            ApiError.write(response, HttpStatus.TOO_MANY_REQUESTS, "rate_limited", "요청이 너무 많아요. 잠시 뒤에 다시 해 주세요.");
+            return;
+        }
         if (!isPublic(path)) {
             String auth = request.getHeader("Authorization");
             if (auth == null || !auth.regionMatches(true, 0, "Bearer ", 0, 7)) {
