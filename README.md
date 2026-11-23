@@ -32,6 +32,7 @@
 - 앱이 보낸 `X-User-Id`는 지우고, 확인한 사용자 id로 다시 붙여 뒤로 넘깁니다.
 - 사용량 제한: 사용자당 분당 30회, 사진이 든 요청(64KB 넘는 요청)은 분당 10회로 시작. 넘으면 429 `rate_limited`.
   앱이 켜질 때 보내는 미리 준비(`POST /api/v1/agent/warm`)는 이 횟수와 따로 사용자당 분당 6회.
+- 로그인 없이 부르는 `/api/v1/auth/*`는 기기(`X-Forwarded-For` 맨 앞, 없으면 접속 주소)당 분당 10회, 계정을 만들 수 있는 `/auth/dev`·`/auth/login`은 모두 합쳐 분당 30회(`gateway.auth-per-minute`, `gateway.signups-per-minute`). 넘으면 429 `rate_limited`, `Retry-After: 60`.
 - 리프레시 토큰은 한 번만 씁니다(DB에는 SHA-256만). 이미 쓴 토큰이 다시 오면 훔친 것으로 보고 그 사용자의 리프레시 토큰을 모두 끊습니다.
 - `FIREBASE_PROJECT_ID`가 없으면 `/auth/login`은 503 `not_configured`, dev가 아니면 `/auth/dev`는 404.
 - 뒤쪽 서비스가 꺼졌으면 502 `upstream_failed`, 30초 안에 답이 없으면 504 `upstream_timeout`.
@@ -53,7 +54,14 @@ curl -X POST localhost:8080/api/v1/auth/dev -H 'Content-Type: application/json' 
 | `AGENT_URL`, `SCHEDULE_URL` | `http://localhost:8081`, `:8092` |
 | `SPRING_DATASOURCE_URL`·`_USERNAME`·`_PASSWORD` | `jdbc:postgresql://localhost:5432/fashion`, `fashion` |
 
-테스트는 `./gradlew test`. DB가 필요한 흐름 테스트(로그인 → JWT → X-User-Id → 뒤쪽 서비스)는 `GATEWAY_TEST_DB_URL=jdbc:postgresql://localhost:5432/fashion`(`GATEWAY_TEST_DB_USER`, `GATEWAY_TEST_DB_PASSWORD`)이 있을 때만 돕니다.
+테스트는 `./gradlew test`. 두 종류로 나눴습니다(시나리오 번호는 앱 레포 `specs/001-account-profile/spec.md`의 Given/When/Then).
+
+| 종류 | 파일 | 하는 일 |
+| --- | --- | --- |
+| 컨트롤러 슬라이스 테스트 | `web/AuthControllerTest`, `web/AuthControllerProdTest`, `web/MeControllerTest`, `tts/TtsControllerTest`, `stt/SttControllerTest` | `@WebMvcTest`로 컨트롤러만 띄우고 서비스·저장소는 `@MockitoBean`. 입력 확인·응답 모양·상태 코드 |
+| 통합 테스트 | `GatewayIntegrationTest` | 앱 전체 + 진짜 PostgreSQL(Testcontainers `postgres:17`). 로그인 → JWT → 필터 → DB → 뒤쪽 서비스까지 Mock 없이 |
+
+통합 테스트는 Docker가 있으면 알아서 돕니다. Docker가 없으면 `TEST_DB_URL=jdbc:postgresql://localhost:5432/fashion`(`TEST_DB_USER`, `TEST_DB_PASSWORD`)으로 있는 DB에 붙이고, 둘 다 없으면 건너뜁니다.
 
 ## 할 일
 
