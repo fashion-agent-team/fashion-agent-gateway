@@ -20,7 +20,7 @@ import com.fashionagent.gateway.web.WearerBody;
 
 import jakarta.servlet.http.HttpServletRequest;
 
-/** POST /api/v1/agent/warm: 로그인한 사용자 id를 붙여 agent로 넘기고, 횟수는 말하기와 따로 적게 셉니다. */
+/** POST /api/v1/agent/warm: 로그인 토큰을 그대로 agent로 넘기고, 횟수는 말하기와 따로 적게 셉니다. */
 class AuthFilterWarmTest {
 
     final GatewayProperties props = new GatewayProperties("0123456789abcdef0123456789abcdef", Duration.ofHours(1),
@@ -54,10 +54,13 @@ class AuthFilterWarmTest {
     }
 
     @Test
-    void 확인한_사용자_id를_붙여_넘기고_미리_준비_바디는_고치지_않는다() throws Exception {
+    void 토큰을_그대로_넘기고_미리_준비_바디는_고치지_않는다() throws Exception {
         assertThat(send("/api/v1/agent/warm", token).getStatus()).isEqualTo(200);
         assertThat(passed).hasSize(1);
-        assertThat(passed.get(0).getHeader("X-User-Id")).isEqualTo(user.toString());
+        // 사용자 id를 헤더에 싣지 않고 토큰을 그대로 넘깁니다. 앱이 넣은 옛 X-User-Id는 지웁니다.
+        assertThat(passed.get(0).getHeader("Authorization")).isEqualTo("Bearer " + token);
+        assertThat(passed.get(0).getHeader("X-User-Id")).isNull();
+        assertThat(java.util.Collections.list(passed.get(0).getHeaderNames())).doesNotContain("X-User-Id");
         assertThat(passed.get(0).getContentLengthLong()).isEqualTo(-1); // MockHttpServletRequest 기본(바디 없음)
         assertThat(passed.get(0).getInputStream().readAllBytes()).isEmpty();
     }
