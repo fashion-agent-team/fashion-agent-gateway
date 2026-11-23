@@ -92,7 +92,7 @@ public class SttService {
             throw new ApiError(HttpStatus.BAD_REQUEST, "bad_request", "소리가 없어요.");
         }
         if (audio.length > MAX_BYTES) {
-            throw new ApiError(HttpStatus.PAYLOAD_TOO_LARGE, "too_large", "소리가 너무 길어요.");
+            throw new ApiError(HttpStatus.CONTENT_TOO_LARGE, "too_large", "소리가 너무 길어요.");
         }
         String mime = mimeType == null || mimeType.isBlank() ? "audio/m4a" : mimeType.strip();
         String p = prompt == null ? "" : prompt.strip();
