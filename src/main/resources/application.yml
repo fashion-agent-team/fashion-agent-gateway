@@ -49,6 +49,9 @@ gateway:
   firebase-project-id: ${FIREBASE_PROJECT_ID:}
   requests-per-minute: 30
   photos-per-minute: 10
+  # 로그인 없이 부르는 /api/v1/auth/*: 기기(IP)당 분당, 계정을 만들 수 있는 /dev·/login 전체 합쳐 분당
+  auth-per-minute: ${GATEWAY_AUTH_PER_MINUTE:10}
+  signups-per-minute: ${GATEWAY_SIGNUPS_PER_MINUTE:30}
 
 management:
   endpoints:
