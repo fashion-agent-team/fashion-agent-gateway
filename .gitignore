@@ -7,3 +7,5 @@ node_modules/
 build/
 .gradle/
 *.log
+__pycache__/
+.pytest_cache/
