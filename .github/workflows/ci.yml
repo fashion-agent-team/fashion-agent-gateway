@@ -45,3 +45,18 @@ jobs:
           name: test-report
           path: build/reports/tests/test
           retention-days: 7
+
+  # TTS 사이드카(edge-tts, 파이썬). 마이크로소프트 서버에는 붙지 않고 가짜 synthesize로 HTTP 계층만 봅니다.
+  edge-tts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: edge-tts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt -r tests/requirements.txt
+      - run: python -m pytest tests -q
