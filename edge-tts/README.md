@@ -25,3 +25,11 @@ docker build -t fashion-agent/edge-tts edge-tts && docker run -p 8099:8099 fashi
 
 마이크로소프트가 접속 방식을 바꾸면 로그에 `edge_failed`가 찍히고, 앱은 폰 목소리로 읽습니다(끊기지 않음).
 `requirements.txt`의 edge-tts 버전을 최신으로 올리고 다시 빌드하면 대개 고쳐집니다.
+
+## 테스트
+
+```bash
+cd edge-tts && pip install -r requirements.txt -r tests/requirements.txt && python -m pytest tests -q
+```
+
+마이크로소프트 서버에는 붙지 않아요(`synthesize`를 가짜로 바꿈). 기본 목소리·속도, 글 길이(1~1000자), 목소리·속도 형식 검사, 연결 실패·시간 초과·빈 소리의 502, 64KB 제한을 봐요. CI(`edge-tts` 잡)도 같은 테스트를 돌려요.
