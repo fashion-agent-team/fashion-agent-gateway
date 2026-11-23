@@ -28,8 +28,8 @@ import jakarta.servlet.http.HttpServletResponse;
 /**
  * 모든 요청의 입구 (약속 3절).
  * <ul>
- * <li>앱이 보낸 X-User-Id는 언제나 지웁니다(남의 id를 넣어 보내는 것 막기).</li>
- * <li>로그인·가족 답장 페이지·health 밖은 Bearer JWT가 있어야 하고, 확인한 사용자 id를 X-User-Id로 붙여 뒤로 넘깁니다.</li>
+ * <li>로그인·health 밖은 Bearer JWT가 있어야 합니다. 뒤쪽 서비스(agent·schedule)에는 그 토큰을 그대로 넘기고,
+ * 각 서비스가 같은 비밀키로 다시 확인해 사용자 id를 꺼냅니다. 사용자 id를 따로 헤더에 싣지 않습니다(2026-11-23 정지원 결정).</li>
  * <li>사용자당 분당 횟수 제한(사진이 든 큰 요청은 따로 더 적게).</li>
  * <li>로그인 없이 부르는 /api/v1/auth/*는 기기(IP)당 분당 {@link #AUTH_PER_MINUTE}번, 계정을 만들 수 있는 /dev·/login은
  * 모두 합쳐 분당 {@link #SIGNUPS_PER_MINUTE}번(누가 계정을 끝없이 만들어 GPT·TTS를 쓰는 것 막기, 2026-11-20 점검).</li>
@@ -41,7 +41,6 @@ public class AuthFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(AuthFilter.class);
     public static final String USER_ID = "gateway.userId";
-    static final String HEADER = "X-User-Id";
     /** 이보다 큰 요청은 사진이 든 것으로 봅니다(말만 있는 요청은 1KB 안팎, 사진은 수백 KB). */
     static final long PHOTO_BYTES = 64 * 1024;
     /** 사용자당 분당 TTS 문장 수. 안내 한 번이 서너 문장이라 넉넉하게. */
@@ -156,7 +155,7 @@ public class AuthFilter extends OncePerRequestFilter {
             }
         }
         try {
-            chain.doFilter(new UserIdRequest(request, userId, addWearer, profile), response);
+            chain.doFilter(new ForwardRequest(request, addWearer, profile), response);
         } catch (Exception e) {
             Throwable cause = rootCause(e);
             if (response.isCommitted()) {
@@ -195,44 +194,35 @@ public class AuthFilter extends OncePerRequestFilter {
     }
 
     /**
-     * 앱이 보낸 X-User-Id를 지우고 게이트웨이가 확인한 값만 남긴 요청.
-     * agent에 보내는 말이면 바디 끝에 "wearer"를 덧붙입니다. 길이가 바뀌므로 Content-Length는 빼고 나눠 보냅니다(chunked).
+     * 뒤쪽 서비스로 넘기는 요청. Authorization 토큰은 그대로 두고, 앱이 몰래 넣은 옛 X-User-Id 헤더는 지웁니다
+     * (예전 방식 서비스가 남아 있어도 남의 id로 속일 수 없게).
+     * agent에 보내는 말(POST /api/v1/agent/turn)이면 바디 끝에 "wearer"를 덧붙이고, 길이가 바뀌므로
+     * Content-Length는 빼고 나눠 보냅니다(chunked).
      */
-    static class UserIdRequest extends HttpServletRequestWrapper {
+    static class ForwardRequest extends HttpServletRequestWrapper {
+        static final String OLD_USER_HEADER = "X-User-Id";
         private static final String LENGTH = "Content-Length";
-        private final String userId;
         private final boolean addWearer;
         private final WearerBody.Wearer wearer;
         private ServletInputStream body;
 
-        UserIdRequest(HttpServletRequest request, UUID userId) {
-            this(request, userId, false, null);
-        }
-
-        UserIdRequest(HttpServletRequest request, UUID userId, boolean addWearer, WearerBody.Wearer wearer) {
+        ForwardRequest(HttpServletRequest request, boolean addWearer, WearerBody.Wearer wearer) {
             super(request);
-            this.userId = userId == null ? null : userId.toString();
             this.addWearer = addWearer;
             this.wearer = wearer;
         }
 
         private boolean hidden(String name) {
-            return addWearer && LENGTH.equalsIgnoreCase(name);
+            return OLD_USER_HEADER.equalsIgnoreCase(name) || (addWearer && LENGTH.equalsIgnoreCase(name));
         }
 
         @Override
         public String getHeader(String name) {
-            if (HEADER.equalsIgnoreCase(name)) {
-                return userId;
-            }
             return hidden(name) ? null : super.getHeader(name);
         }
 
         @Override
         public Enumeration<String> getHeaders(String name) {
-            if (HEADER.equalsIgnoreCase(name)) {
-                return userId == null ? Collections.emptyEnumeration() : Collections.enumeration(List.of(userId));
-            }
             return hidden(name) ? Collections.emptyEnumeration() : super.getHeaders(name);
         }
 
@@ -241,12 +231,9 @@ public class AuthFilter extends OncePerRequestFilter {
             List<String> names = new ArrayList<>();
             for (Enumeration<String> e = super.getHeaderNames(); e.hasMoreElements();) {
                 String n = e.nextElement();
-                if (!HEADER.equalsIgnoreCase(n) && !hidden(n)) {
+                if (!hidden(n)) {
                     names.add(n);
                 }
-            }
-            if (userId != null) {
-                names.add(HEADER);
             }
             return Collections.enumeration(names);
         }

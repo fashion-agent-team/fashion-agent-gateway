@@ -74,8 +74,10 @@ class GatewayIntegrationTest {
 
     static HttpServer agent;
     static int deadPort;
-    /** agent가 받은 X-User-Id 헤더들(여러 개 오면 모두). */
+    /** agent가 받은 옛 X-User-Id 헤더들(이제는 늘 비어 있어야 함). */
     static final List<List<String>> seenUserIds = new CopyOnWriteArrayList<>();
+    /** agent가 받은 Authorization 헤더들. */
+    static final List<List<String>> seenAuth = new CopyOnWriteArrayList<>();
     /** agent가 받은 말 바디들. */
     static final List<String> seenBodies = new CopyOnWriteArrayList<>();
 
@@ -84,6 +86,7 @@ class GatewayIntegrationTest {
         agent = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         agent.createContext("/api/v1/agent/turn", ex -> {
             seenUserIds.add(ex.getRequestHeaders().getOrDefault("X-User-Id", List.of()));
+            seenAuth.add(ex.getRequestHeaders().getOrDefault("Authorization", List.of()));
             seenBodies.add(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             byte[] body = "{\"speech\":\"ok\",\"next\":\"listen\"}".getBytes(StandardCharsets.UTF_8);
             ex.getResponseHeaders().add("Content-Type", "application/json");
@@ -93,6 +96,7 @@ class GatewayIntegrationTest {
         });
         agent.createContext("/api/v1/agent/warm", ex -> {
             seenUserIds.add(ex.getRequestHeaders().getOrDefault("X-User-Id", List.of()));
+            seenAuth.add(ex.getRequestHeaders().getOrDefault("Authorization", List.of()));
             ex.sendResponseHeaders(202, -1);
             ex.close();
         });
@@ -176,11 +180,12 @@ class GatewayIntegrationTest {
     }
 
     @Test
-    @DisplayName("FR-010 Given 로그인한 사용자 When 앱이 X-User-Id를 남의 id로 넣어 보내면 Then 지우고 JWT의 사용자 id로 바꿔 agent에 넘긴다")
-    void 앱이_넣은_X_User_Id는_지우고_JWT의_사용자로_바꾼다() throws Exception {
+    @DisplayName("FR-010 Given 로그인한 사용자 When 앱이 X-User-Id를 남의 id로 넣어 보내면 Then 그 헤더는 지우고 로그인 토큰만 그대로 agent에 넘긴다")
+    void 앱이_넣은_X_User_Id는_지우고_토큰만_넘긴다() throws Exception {
         // given
         Tokens t = devLogin(newDevice());
         seenUserIds.clear();
+        seenAuth.clear();
 
         // when
         Res r = call("POST", "/api/v1/agent/turn", t.accessToken(), new Utterance("x"),
@@ -188,11 +193,8 @@ class GatewayIntegrationTest {
 
         // then
         assertThat(r.status()).isEqualTo(200);
-        assertThat(seenUserIds).hasSize(1);
-        List<String> got = seenUserIds.get(0);
-        assertThat(got).hasSize(1);
-        assertThat(got.get(0)).isNotEqualTo("11111111-1111-1111-1111-111111111111");
-        assertThat(UUID.fromString(got.get(0))).isNotNull();
+        assertThat(seenUserIds).containsExactly(List.of());
+        assertThat(seenAuth).containsExactly(List.of("Bearer " + t.accessToken()));
     }
 
     @Test
@@ -207,19 +209,20 @@ class GatewayIntegrationTest {
     }
 
     @Test
-    @DisplayName("Given 로그인한 사용자 When 미리 준비(warm)를 보내면 Then 사용자 id를 붙여 agent로 넘기고 202를 그대로 돌려준다")
-    void 미리_준비는_사용자_id를_붙여_agent로_넘긴다() throws Exception {
+    @DisplayName("Given 로그인한 사용자 When 미리 준비(warm)를 보내면 Then 로그인 토큰을 그대로 agent로 넘기고 202를 그대로 돌려준다")
+    void 미리_준비는_토큰을_그대로_agent로_넘긴다() throws Exception {
         // given
         String token = devLogin(newDevice()).accessToken();
         seenUserIds.clear();
+        seenAuth.clear();
 
         // when
         Res r = call("POST", "/api/v1/agent/warm", token, new Warm(new Location(37.5, 127.0)));
 
         // then
         assertThat(r.status()).isEqualTo(202);
-        assertThat(seenUserIds).hasSize(1);
-        assertThat(UUID.fromString(seenUserIds.get(0).get(0))).isNotNull();
+        assertThat(seenUserIds).containsExactly(List.of());
+        assertThat(seenAuth).containsExactly(List.of("Bearer " + token));
     }
 
     @Test

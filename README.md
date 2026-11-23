@@ -29,7 +29,8 @@
 
 - 앱이 부르는 곳은 이 게이트웨이(8080) 하나뿐입니다. 뒤쪽 서비스 포트는 밖에 열지 않습니다.
 - JWT는 여기서만 만들고 확인합니다(HS256, `JWT_SECRET`). 클레임: `sub`(사용자 UUID), `provider`, `iat`, `exp`.
-- 앱이 보낸 `X-User-Id`는 지우고, 확인한 사용자 id로 다시 붙여 뒤로 넘깁니다.
+- 사용자 id를 헤더에 따로 싣지 않습니다. 확인한 `Authorization: Bearer` 토큰을 그대로 agent에 넘기고, agent·일정 서버가 같은 `JWT_SECRET`으로 직접 확인합니다(2026-11-23). 앱이 넣은 옛 `X-User-Id` 헤더는 지웁니다.
+  배포할 때 agent·mcp-schedule에도 게이트웨이와 같은 `JWT_SECRET`을 넣고, 두 서버를 게이트웨이보다 먼저 올립니다.
 - 사용량 제한: 사용자당 분당 30회, 사진이 든 요청(64KB 넘는 요청)은 분당 10회로 시작. 넘으면 429 `rate_limited`.
   앱이 켜질 때 보내는 미리 준비(`POST /api/v1/agent/warm`)는 이 횟수와 따로 사용자당 분당 6회.
 - 로그인 없이 부르는 `/api/v1/auth/*`는 기기(`X-Forwarded-For` 맨 앞, 없으면 접속 주소)당 분당 10회, 계정을 만들 수 있는 `/auth/dev`·`/auth/login`은 모두 합쳐 분당 30회(`gateway.auth-per-minute`, `gateway.signups-per-minute`). 넘으면 429 `rate_limited`, `Retry-After: 60`.
@@ -66,7 +67,7 @@ curl -X POST localhost:8080/api/v1/auth/dev -H 'Content-Type: application/json' 
 ## 할 일
 
 - [x] Spring Boot 뼈대 + `/actuator/health` + Dockerfile
-- [x] `/api/v1/auth/dev` + JWT 발급·검증 필터 + `X-User-Id` 붙이기
+- [x] `/api/v1/auth/dev` + JWT 발급·검증 필터(토큰은 그대로 뒤로 넘김)
 - [x] agent·mcp-schedule로 라우팅 (mcp-helper는 2026-11-11 뺌)
 - [x] 회원정보 API (`account` 스키마), 푸시 토큰
 - [x] Firebase 로그인 (`/api/v1/auth/login`, 구글 공개 키로 확인), 리프레시
@@ -79,7 +80,7 @@ curl -X POST localhost:8080/api/v1/auth/dev -H 'Content-Type: application/json' 
 
 모든 레포가 지키는 약속은 앱 레포에 있습니다. **코드보다 약속 문서를 먼저 고칩니다.**
 
-- [서비스 간 약속](https://github.com/fashion-agent-team/fashion-agent/blob/develop/docs/contracts/README.md): 공통 규칙, 포트, 인증(`X-User-Id`), 오류 모양, DB 스키마, 옷 추천 흐름
+- [서비스 간 약속](https://github.com/fashion-agent-team/fashion-agent/blob/develop/docs/contracts/README.md): 공통 규칙, 포트, 인증(로그인 토큰), 오류 모양, DB 스키마, 옷 추천 흐름
 - [MCP 도구 입출력](https://github.com/fashion-agent-team/fashion-agent/blob/develop/docs/contracts/mcp-tools.md)
 - [앱 ↔ 게이트웨이 API (OpenAPI)](https://github.com/fashion-agent-team/fashion-agent/blob/develop/docs/contracts/openapi.yaml)
 - [아키텍처와 기술 스택](https://github.com/fashion-agent-team/fashion-agent/blob/develop/docs/ARCHITECTURE.md)
