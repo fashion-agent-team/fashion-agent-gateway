@@ -1,4 +1,4 @@
-package com.fashionagent.gateway;
+package com.fashionagent.gateway.stt;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -10,7 +10,6 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
-import com.fashionagent.gateway.stt.SttService;
 import com.fashionagent.gateway.web.ApiError;
 
 class SttServiceTest {

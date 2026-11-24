@@ -1,4 +1,4 @@
-package com.fashionagent.gateway;
+package com.fashionagent.gateway.auth;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -11,7 +11,7 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 
-import com.fashionagent.gateway.auth.JwtService;
+import com.fashionagent.gateway.GatewayProperties;
 import com.fashionagent.gateway.web.ApiError;
 
 class JwtServiceTest {

@@ -1,4 +1,4 @@
-package com.fashionagent.gateway;
+package com.fashionagent.gateway.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -14,9 +14,8 @@ import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
+import com.fashionagent.gateway.GatewayProperties;
 import com.fashionagent.gateway.auth.JwtService;
-import com.fashionagent.gateway.web.AuthFilter;
-import com.fashionagent.gateway.web.RateLimiter;
 
 /**
  * 로그인 없이 부르는 /api/v1/auth/* 횟수 제한(2026-11-20 점검: 누구나 dev 로그인으로 계정을 끝없이 만들어 GPT·TTS를 쓸 수 있었음).
