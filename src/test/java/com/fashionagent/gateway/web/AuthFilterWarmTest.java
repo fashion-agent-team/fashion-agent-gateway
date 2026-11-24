@@ -1,4 +1,4 @@
-package com.fashionagent.gateway;
+package com.fashionagent.gateway.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -13,10 +13,8 @@ import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
+import com.fashionagent.gateway.GatewayProperties;
 import com.fashionagent.gateway.auth.JwtService;
-import com.fashionagent.gateway.web.AuthFilter;
-import com.fashionagent.gateway.web.RateLimiter;
-import com.fashionagent.gateway.web.WearerBody;
 
 import jakarta.servlet.http.HttpServletRequest;
 
