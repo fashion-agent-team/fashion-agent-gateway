@@ -1,4 +1,4 @@
-package com.fashionagent.gateway;
+package com.fashionagent.gateway.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -11,7 +11,6 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 
-import com.fashionagent.gateway.web.RateLimiter;
 
 class RateLimiterTest {
 
