@@ -15,6 +15,9 @@ spring:
     hikari:
       # SQL에 스키마 이름을 붙이지 않으므로 연결의 기본 스키마를 account로
       schema: account
+      # DB가 죽었을 때 기본값(30초) 동안 매달리지 않고 3초 만에 실패하게(2026-11-25 부하 테스트).
+      # 30초면 health·로그인·대화(내 정보 읽기)가 모두 30초씩 멈추고 요청이 수백 개씩 쌓였습니다.
+      connection-timeout: 3000 # 밀리초(Hikari는 "3s"를 못 읽음)
   flyway:
     # 공용 DB라서 Flyway 기록 표도 account 스키마 안에 둡니다(다른 서비스와 안 겹치게).
     schemas: account
