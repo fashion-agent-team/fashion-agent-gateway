@@ -52,6 +52,12 @@ gateway:
   # 로그인 없이 부르는 /api/v1/auth/*: 기기(IP)당 분당, 계정을 만들 수 있는 /dev·/login 전체 합쳐 분당
   auth-per-minute: ${GATEWAY_AUTH_PER_MINUTE:10}
   signups-per-minute: ${GATEWAY_SIGNUPS_PER_MINUTE:30}
+  # 하루 전체 로그인(계정을 만들 수 있는 /dev·/login) 한도(2026-11-25 보안 점검)
+  signups-per-day: ${GATEWAY_SIGNUPS_PER_DAY:300}
+  # 기기 주소를 찾을 때 건너뛸 프록시(사설망·Tailscale·루프백은 기본). 강사님 프록시 바깥 주소 등을 쉼표로.
+  trusted-proxies: ${GATEWAY_TRUSTED_PROXIES:}
+  # 비우지 않으면 개발용 로그인(/api/v1/auth/dev)은 X-Dev-Login-Key 헤더가 이 값과 같아야 받습니다. 앱 빌드에 같은 값을 넣음.
+  dev-login-key: ${GATEWAY_DEV_LOGIN_KEY:}
 
 management:
   endpoints:

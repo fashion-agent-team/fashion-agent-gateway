@@ -1,9 +1,14 @@
 package com.fashionagent.gateway.web;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -34,13 +39,24 @@ public class AuthController {
     private final JwtService jwt;
     private final FirebaseVerifier firebase;
     private final GatewayProperties props;
+    /** 비어 있지 않으면 개발용 로그인은 X-Dev-Login-Key 헤더가 이 값과 같아야 받음(2026-11-25 보안 점검). */
+    private final byte[] devLoginKey;
 
     public AuthController(AccountStore accounts, JwtService jwt, ObjectProvider<FirebaseVerifier> firebase,
-            GatewayProperties props) {
+            GatewayProperties props, @Value("${gateway.dev-login-key:}") String devLoginKey) {
         this.accounts = accounts;
         this.jwt = jwt;
         this.firebase = firebase.getIfAvailable();
         this.props = props;
+        this.devLoginKey = devLoginKey == null || devLoginKey.isBlank() ? null
+                : devLoginKey.strip().getBytes(StandardCharsets.UTF_8);
+    }
+
+    private boolean devKeyOk(String given) {
+        if (devLoginKey == null) {
+            return true;
+        }
+        return given != null && MessageDigest.isEqual(devLoginKey, given.strip().getBytes(StandardCharsets.UTF_8));
     }
 
     @PostMapping("/login")
@@ -57,8 +73,10 @@ public class AuthController {
     }
 
     @PostMapping("/dev")
-    public Tokens dev(@RequestBody DevRequest body) {
-        if (!props.devLogin()) {
+    public Tokens dev(@RequestBody DevRequest body,
+            @RequestHeader(name = "X-Dev-Login-Key", required = false) String key) {
+        // 키가 틀려도 꺼진 것과 똑같이 보이게(주소가 있는지도 알려 주지 않음)
+        if (!props.devLogin() || !devKeyOk(key)) {
             // 발표 빌드에서는 없는 주소처럼 보이게
             throw new ApiError(HttpStatus.NOT_FOUND, "not_found", "없는 주소예요.");
         }

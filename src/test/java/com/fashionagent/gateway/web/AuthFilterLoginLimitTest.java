@@ -104,4 +104,72 @@ class AuthFilterLoginLimitTest {
             assertThat(send("/actuator/health", "203.0.113.9", "127.0.0.1").getStatus()).isEqualTo(200);
         }
     }
+
+    @Test
+    @DisplayName("Given 한 기기가 X-Forwarded-For 맨 앞을 매번 바꿔 보냄 When 1분에 11번 Then 프록시가 붙인 진짜 주소로 세어 11번째는 429")
+    void spoofedForwardedFor() throws Exception {
+        // given: 앱이 지어 넣은 값(맨 앞) + 강사님 프록시가 붙인 진짜 주소 203.0.113.50 + Tailscale
+        for (int i = 0; i < 10; i++) {
+            String forwarded = "198.51.100." + i + ", 203.0.113.50, 100.90.21.23";
+            assertThat(send("/api/v1/auth/refresh", forwarded, "127.0.0.1").getStatus()).isEqualTo(200);
+        }
+
+        // when
+        MockHttpServletResponse over = send("/api/v1/auth/refresh", "198.51.100.99, 203.0.113.50, 100.90.21.23",
+                "127.0.0.1");
+
+        // then
+        assertThat(over.getStatus()).isEqualTo(429);
+    }
+
+    @Test
+    @DisplayName("Given 하루 한도 3 When 분을 바꿔 가며 dev 로그인 4번 Then 4번째는 429, 다음 날은 다시 된다")
+    void signupsPerDay() throws Exception {
+        // given
+        java.util.concurrent.atomic.AtomicReference<Instant> now = new java.util.concurrent.atomic.AtomicReference<>(
+                Instant.parse("2026-11-25T01:00:30Z"));
+        Clock moving = new Clock() {
+            @Override
+            public ZoneOffset getZone() {
+                return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(java.time.ZoneId zone) {
+                return this;
+            }
+
+            @Override
+            public Instant instant() {
+                return now.get();
+            }
+        };
+        AuthFilter daily = new AuthFilter(new JwtService(props, moving), new RateLimiter(moving), props, null, 10, 30, 3,
+                ClientIp.defaults());
+        MockHttpServletRequest req;
+        int ok = 0;
+
+        // when
+        for (int i = 0; i < 4; i++) {
+            now.set(now.get().plusSeconds(120));
+            req = new MockHttpServletRequest("POST", "/api/v1/auth/dev");
+            req.setRemoteAddr("203.0.113." + i);
+            MockHttpServletResponse res = new MockHttpServletResponse();
+            daily.doFilter(req, res, new MockFilterChain());
+            if (res.getStatus() == 200) {
+                ok++;
+            } else {
+                assertThat(res.getStatus()).isEqualTo(429);
+            }
+        }
+        now.set(now.get().plus(Duration.ofDays(1)));
+        req = new MockHttpServletRequest("POST", "/api/v1/auth/dev");
+        req.setRemoteAddr("203.0.113.9");
+        MockHttpServletResponse nextDay = new MockHttpServletResponse();
+        daily.doFilter(req, nextDay, new MockFilterChain());
+
+        // then
+        assertThat(ok).isEqualTo(3);
+        assertThat(nextDay.getStatus()).isEqualTo(200);
+    }
 }

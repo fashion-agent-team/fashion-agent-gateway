@@ -22,12 +22,19 @@ public class RateLimiter {
 
     /** 이번 분에 한 번 더 해도 되면 true(그리고 한 번 셈). */
     public boolean tryAcquire(String key, int perMinute) {
-        long minute = clock.millis() / 60_000;
-        Window w = windows.compute(key, (k, old) -> old == null || old.minute() != minute
-                ? new Window(minute, 1) : new Window(minute, old.count() + 1));
+        return tryAcquire(key, perMinute, 60_000);
+    }
+
+    /** 이번 창(windowMillis 단위 고정 창)에 한 번 더 해도 되면 true(그리고 한 번 셈). 하루 한도 등에 씁니다. */
+    public boolean tryAcquire(String key, int limit, long windowMillis) {
+        long slot = clock.millis() / windowMillis;
+        String k = windowMillis == 60_000 ? key : key + "@" + windowMillis;
+        Window w = windows.compute(k, (x, old) -> old == null || old.minute() != slot
+                ? new Window(slot, 1) : new Window(slot, old.count() + 1));
         if (windows.size() > 10_000) {
-            windows.values().removeIf(x -> x.minute() < minute);
+            long minute = clock.millis() / 60_000;
+            windows.entrySet().removeIf(e -> !e.getKey().contains("@") && e.getValue().minute() < minute);
         }
-        return w.count() <= perMinute;
+        return w.count() <= limit;
     }
 }
