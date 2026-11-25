@@ -32,7 +32,8 @@ import jakarta.servlet.http.HttpServletResponse;
  * 각 서비스가 같은 비밀키로 다시 확인해 사용자 id를 꺼냅니다. 사용자 id를 따로 헤더에 싣지 않습니다(2026-11-23 정지원 결정).</li>
  * <li>사용자당 분당 횟수 제한(사진이 든 큰 요청은 따로 더 적게).</li>
  * <li>로그인 없이 부르는 /api/v1/auth/*는 기기(IP)당 분당 {@link #AUTH_PER_MINUTE}번, 계정을 만들 수 있는 /dev·/login은
- * 모두 합쳐 분당 {@link #SIGNUPS_PER_MINUTE}번(누가 계정을 끝없이 만들어 GPT·TTS를 쓰는 것 막기, 2026-11-20 점검).</li>
+ * 모두 합쳐 분당 {@link #SIGNUPS_PER_MINUTE}번, 하루 {@link #SIGNUPS_PER_DAY}번(누가 계정을 끝없이 만들어 GPT·TTS를 쓰는 것 막기,
+ * 2026-11-20·11-25 점검). 기기 주소는 {@link ClientIp}로 찾아서 X-Forwarded-For를 지어 보내도 속지 않습니다.</li>
  * <li>agent에 보내는 말(POST /api/v1/agent/turn)의 바디에는 옷 판단에 쓰는 내 정보만 "wearer"로 넣습니다(앱이 보낸 값은 덮어씀, {@link WearerBody}).</li>
  * <li>뒤쪽 서비스가 꺼졌거나 늦으면 약속 4절 모양으로 502 upstream_failed, 504 upstream_timeout.</li>
  * </ul>
@@ -53,6 +54,10 @@ public class AuthFilter extends OncePerRequestFilter {
     /** 기본값. application.yml gateway.signups-per-minute로 바꿈. IP를 바꿔 가며 보내도 전체로 막습니다. */
     public static final int SIGNUPS_PER_MINUTE = 30;
     static final String SIGNUP_KEY = "signup:all";
+    /** 기본값. application.yml gateway.signups-per-day로 바꿈. 하루에 개발용·구글 로그인 전체 합쳐 이만큼(2026-11-25 보안 점검). */
+    public static final int SIGNUPS_PER_DAY = 300;
+    static final String SIGNUP_DAY_KEY = "signup-day:all";
+    static final long DAY_MILLIS = 24L * 60 * 60 * 1000;
 
     private final JwtService jwt;
     private final RateLimiter limiter;
@@ -61,6 +66,8 @@ public class AuthFilter extends OncePerRequestFilter {
     private final Function<UUID, WearerBody.Wearer> wearer;
     private final int authPerMinute;
     private final int signupsPerMinute;
+    private final int signupsPerDay;
+    private final ClientIp clientIp;
 
     public AuthFilter(JwtService jwt, RateLimiter limiter, GatewayProperties props) {
         this(jwt, limiter, props, null);
@@ -73,24 +80,25 @@ public class AuthFilter extends OncePerRequestFilter {
 
     public AuthFilter(JwtService jwt, RateLimiter limiter, GatewayProperties props,
             Function<UUID, WearerBody.Wearer> wearer, int authPerMinute, int signupsPerMinute) {
+        this(jwt, limiter, props, wearer, authPerMinute, signupsPerMinute, SIGNUPS_PER_DAY, ClientIp.defaults());
+    }
+
+    public AuthFilter(JwtService jwt, RateLimiter limiter, GatewayProperties props,
+            Function<UUID, WearerBody.Wearer> wearer, int authPerMinute, int signupsPerMinute, int signupsPerDay,
+            ClientIp clientIp) {
         this.jwt = jwt;
         this.limiter = limiter;
         this.props = props;
         this.wearer = wearer;
         this.authPerMinute = authPerMinute;
         this.signupsPerMinute = signupsPerMinute;
+        this.signupsPerDay = signupsPerDay;
+        this.clientIp = clientIp;
     }
 
-    /** 앱 → 강사님 프록시 → Funnel → nginx를 거쳐 오므로 X-Forwarded-For 맨 앞이 앱 쪽 주소. 없으면 바로 붙은 주소. */
-    static String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null) {
-            String first = forwarded.split(",", 2)[0].strip();
-            if (!first.isEmpty()) {
-                return first;
-            }
-        }
-        return request.getRemoteAddr();
+    /** 앱 → 강사님 프록시 → Funnel → nginx. 믿는 프록시를 오른쪽부터 건너뛴 첫 바깥 주소({@link ClientIp}). */
+    String clientIp(HttpServletRequest request) {
+        return clientIp.of(request);
     }
 
     /** 계정을 새로 만들 수 있는 로그인(dev 로그인, 구글/Firebase 로그인). */
@@ -110,7 +118,8 @@ public class AuthFilter extends OncePerRequestFilter {
         UUID userId = null;
         if (path.startsWith("/api/v1/auth/")
                 && (!limiter.tryAcquire("auth:" + clientIp(request), authPerMinute)
-                        || (isSignup(path) && !limiter.tryAcquire(SIGNUP_KEY, signupsPerMinute)))) {
+                        || (isSignup(path) && (!limiter.tryAcquire(SIGNUP_KEY, signupsPerMinute)
+                                || !limiter.tryAcquire(SIGNUP_DAY_KEY, signupsPerDay, DAY_MILLIS))))) {
             response.setHeader("Retry-After", "60");
             ApiError.write(response, HttpStatus.TOO_MANY_REQUESTS, "rate_limited", "요청이 너무 많아요. 잠시 뒤에 다시 해 주세요.");
             return;

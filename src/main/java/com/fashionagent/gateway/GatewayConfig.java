@@ -18,6 +18,7 @@ import com.fashionagent.gateway.auth.JwtService;
 import com.fashionagent.gateway.stt.SttService;
 import com.fashionagent.gateway.tts.TtsService;
 import com.fashionagent.gateway.web.AuthFilter;
+import com.fashionagent.gateway.web.ClientIp;
 import com.fashionagent.gateway.web.RateLimiter;
 import com.fashionagent.gateway.web.WearerBody;
 
@@ -78,10 +79,12 @@ public class GatewayConfig {
     FilterRegistrationBean<AuthFilter> authFilter(JwtService jwt, RateLimiter limiter, GatewayProperties props,
             AccountStore accounts, Clock clock,
             @Value("${gateway.auth-per-minute:" + AuthFilter.AUTH_PER_MINUTE + "}") int authPerMinute,
-            @Value("${gateway.signups-per-minute:" + AuthFilter.SIGNUPS_PER_MINUTE + "}") int signupsPerMinute) {
+            @Value("${gateway.signups-per-minute:" + AuthFilter.SIGNUPS_PER_MINUTE + "}") int signupsPerMinute,
+            @Value("${gateway.signups-per-day:" + AuthFilter.SIGNUPS_PER_DAY + "}") int signupsPerDay,
+            @Value("${gateway.trusted-proxies:}") String trustedProxies) {
         var bean = new FilterRegistrationBean<>(new AuthFilter(jwt, limiter, props,
                 userId -> WearerBody.of(accounts.profile(userId), LocalDate.now(clock.withZone(SEOUL))),
-                authPerMinute, signupsPerMinute));
+                authPerMinute, signupsPerMinute, signupsPerDay, new ClientIp(trustedProxies)));
         bean.setOrder(Ordered.HIGHEST_PRECEDENCE + 10);
         bean.addUrlPatterns("/*");
         return bean;
